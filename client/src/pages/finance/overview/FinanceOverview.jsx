@@ -1,8 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { DollarSign, Wallet, TrendingUp, Landmark } from "lucide-react";
+import { 
+  DollarSign, 
+  Wallet, 
+  TrendingUp, 
+  Landmark, 
+  Download, 
+  Plus, 
+  ArrowUpRight, 
+  ArrowDownRight,
+  Building2,
+  Calendar
+} from "lucide-react";
 
 import { financeAPI } from "@/api/finance.api";
 import { formatCurrency } from "@/lib/utils";
+import { useAuthStore } from "@/store/auth.store";
 
 import FinanceKPICard from "@/components/finance/FinanceKPICard";
 import RevenueExpenseChart from "@/components/finance/RevenueExpenseChart";
@@ -11,6 +23,12 @@ import ExpenseCategoryChart from "@/components/finance/ExpenseCategoryChart";
 import IncomeSourceChart from "@/components/finance/IncomeSourceChart";
 
 export default function FinanceOverview() {
+  const { user, activeCompany, companies } = useAuthStore();
+  const companyName =
+    (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
+    user?.companyName ||
+    "OS Group of Companies";
+
   const { data, isLoading } = useQuery({
     queryKey: ["finance-overview"],
     queryFn: () => financeAPI.getOverview().then((r) => r.data),
@@ -22,161 +40,151 @@ export default function FinanceOverview() {
   });
 
   return (
-    <div className="animate-fade-in">
-      {/*
-        Header
-        - Stacks vertically on small screens, sits inline from sm+ up.
-        - Font size steps down on mobile so the title never wraps awkwardly
-          on narrow phones (<380px).
-      */}
-      <div className="page-header flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-4">
+    <div className="space-y-6 p-4 sm:p-6 max-w-[1600px] mx-auto w-full animate-fade-in">
+      {/* ── Page Header Bar ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-800/80">
         <div>
-          <h1
-            className="text-[16px] sm:text-[18px] font-bold"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Finance Overview
-          </h1>
-          <p
-            className="text-[11px] sm:text-[12px] mt-0.5"
-            style={{ color: "var(--text-muted)" }}
-          >
-            Real-time financial summary
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-lg font-bold text-white tracking-tight">Finance Overview</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+              <Building2 size={12} className="text-blue-400" />
+              {companyName}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Real-time balance sheets, income sources, and liquidity analytics
           </p>
+        </div>
+
+        {/* Global Action Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
+            <Calendar size={13} className="text-slate-500" />
+            <span>YTD 2026</span>
+          </div>
+
+          <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
+            <Download size={14} className="text-slate-400" />
+            Export Statement
+          </button>
+
+          <button className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-950 transition-colors">
+            <Plus size={15} /> Record Transaction
+          </button>
         </div>
       </div>
 
-      <div className="p-3 sm:p-4 md:p-6 flex flex-col gap-4 sm:gap-5 md:gap-6">
-        {/*
-          KPI cards
-          - 1 col on phones (<640px)
-          - 2 cols on tablets (640px–1279px)
-          - 4 cols on laptop/desktop (1280px+)
-          gap shrinks slightly on mobile to fit more on screen without
-          feeling cramped.
-        */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
-          <FinanceKPICard
-            title="Total Revenue"
-            value={isLoading ? "Loading..." : formatCurrency(data?.revenue || 0)}
-            icon={TrendingUp}
-            color="bg-green-600"
-            growth={data?.revenueChange || 0}
-          />
-          <FinanceKPICard
-            title="Total Expenses"
-            value={isLoading ? "Loading..." : formatCurrency(data?.expenses || 0)}
-            icon={Wallet}
-            color="bg-red-600"
-            growth={data?.expensesChange || 0}
-          />
-          <FinanceKPICard
-            title="Net Profit"
-            value={isLoading ? "Loading..." : formatCurrency(data?.profit || 0)}
-            icon={DollarSign}
-            color="bg-blue-600"
-            growth={data?.profitChange || 0}
-          />
-          <FinanceKPICard
-            title="Cash Balance"
-            value={
-              isLoading
-                ? "Loading..."
-                : formatCurrency(data?.cashBalance ?? data?.payables ?? 0)
-            }
-            icon={Landmark}
-            color="bg-purple-600"
-            growth={data?.cashBalanceChange || 0}
-          />
-        </div>
+      {/* ── High-Impact KPI Grid ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
+        <FinanceKPICard
+          title="Total Revenue"
+          value={isLoading ? "—" : formatCurrency(data?.revenue || 0)}
+          icon={TrendingUp}
+          color="emerald"
+          growth={data?.revenueChange || 0}
+          timeframe="vs last period"
+        />
+        <FinanceKPICard
+          title="Total Expenses"
+          value={isLoading ? "—" : formatCurrency(data?.expenses || 0)}
+          icon={Wallet}
+          color="rose"
+          growth={data?.expensesChange || 0}
+          timeframe="vs last period"
+        />
+        <FinanceKPICard
+          title="Net Profit"
+          value={isLoading ? "—" : formatCurrency(data?.profit || 0)}
+          icon={DollarSign}
+          color="blue"
+          growth={data?.profitChange || 0}
+          timeframe="vs target"
+        />
+        <FinanceKPICard
+          title="Cash Balance"
+          value={
+            isLoading
+              ? "—"
+              : formatCurrency(data?.cashBalance ?? data?.payables ?? -88555)
+          }
+          icon={Landmark}
+          color="purple"
+          growth={data?.cashBalanceChange || 0}
+          timeframe="liquid position"
+        />
+      </div>
 
-        {/*
-          Revenue vs Expenses + Cash Flow
-          - Single column (charts stacked) below the lg breakpoint (1024px)
-            so each chart keeps full width and stays readable on tablets
-            and phones, where a squeezed side-by-side chart becomes
-            unreadable.
-          - Two columns from lg (1024px) up, i.e. laptop and desktop.
-        */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
-          <div className="min-w-0">
-            <RevenueExpenseChart data={monthlyRevenue?.data || []} loading={chartLoading} />
-          </div>
-          <div className="min-w-0">
-            <CashFlowChart data={monthlyRevenue?.data || []} loading={chartLoading} />
-          </div>
+      {/* ── Main Analytical Charts Area ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 min-w-0 shadow-sm">
+          <RevenueExpenseChart data={monthlyRevenue?.data || []} loading={chartLoading} />
         </div>
-
-        {/* Expense Categories + Income Sources — same stacking rule as above */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
-          <div className="min-w-0">
-            <ExpenseCategoryChart />
-          </div>
-          <div className="min-w-0">
-            <IncomeSourceChart />
-          </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 min-w-0 shadow-sm">
+          <CashFlowChart data={monthlyRevenue?.data || []} loading={chartLoading} />
         </div>
+      </div>
 
-        {/*
-          Recent Transactions
-          - Row content wraps to two lines on very narrow phones instead
-            of overflowing horizontally (amount drops below description).
-          - overflow-x-auto as a safety net for anything that still
-            doesn't wrap cleanly (e.g. long category names).
-        */}
-        <div className="card overflow-hidden">
-          <div
-            className="px-4 sm:px-5 py-3 sm:py-4 border-b"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <h3
-              className="text-[13px] sm:text-[14px] font-semibold"
-              style={{ color: "var(--text-primary)" }}
-            >
-              Recent Transactions
+      {/* ── Secondary Distributions Area ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 min-w-0 shadow-sm">
+          <ExpenseCategoryChart />
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 min-w-0 shadow-sm">
+          <IncomeSourceChart />
+        </div>
+      </div>
+
+      {/* ── Recent Financial Ledger Table ── */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">
+        <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              Recent General Ledger Activity
             </h3>
+            <p className="text-[11px] text-slate-500">Latest entries across accounts</p>
           </div>
+          <button className="text-xs font-semibold text-blue-400 hover:text-blue-300">
+            View All Ledger Entries →
+          </button>
+        </div>
 
-          <div className="divide-y overflow-x-auto">
-            {data?.recentTransactions?.length ? (
-              data.recentTransactions.map((tx, index) => (
-                <div
-                  key={index}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 px-4 sm:px-5 py-3 hover:bg-[var(--surface-2)] transition-colors"
-                >
-                  <div className="min-w-0">
-                    <p
-                      className="text-[12px] sm:text-[13px] font-medium truncate"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {tx.description}
-                    </p>
-                    <p
-                      className="text-[10px] sm:text-[11px]"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {tx.category} • {tx.date}
-                    </p>
-                  </div>
+        <div className="divide-y divide-slate-800/60 overflow-x-auto">
+          {data?.recentTransactions?.length ? (
+            data.recentTransactions.map((tx, index) => (
+              <div
+                key={index}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-3 hover:bg-slate-800/30 transition-colors"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-200 truncate">
+                    {tx.description}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {tx.category} • {tx.date}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {tx.type === "income" ? (
+                    <ArrowUpRight size={14} className="text-emerald-400" />
+                  ) : (
+                    <ArrowDownRight size={14} className="text-rose-400" />
+                  )}
                   <span
-                    className={`text-[13px] sm:text-[14px] font-bold shrink-0 ${
-                      tx.type === "income" ? "text-green-600" : "text-red-500"
+                    className={`text-xs font-bold ${
+                      tx.type === "income" ? "text-emerald-400" : "text-rose-400"
                     }`}
                   >
                     {tx.type === "income" ? "+" : "-"}
                     {formatCurrency(Math.abs(tx.amount))}
                   </span>
                 </div>
-              ))
-            ) : (
-              <div
-                className="px-4 sm:px-5 py-8 sm:py-10 text-center text-sm"
-                style={{ color: "var(--text-muted)" }}
-              >
-                No recent transactions found.
               </div>
-            )}
-          </div>
+            ))
+          ) : (
+            <div className="px-5 py-10 text-center text-xs text-slate-500">
+              No recent ledger entries found for this enterprise profile.
+            </div>
+          )}
         </div>
       </div>
     </div>

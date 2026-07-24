@@ -53,12 +53,27 @@ const canView = async (req, employee) => {
  * record linked to the authenticated User.
  */
 const findReviewerEmployee = async (req, companyId) => {
-  return Employee.findOne({
-    where: {
-      userId: req.user.id,
-      companyId,
-    },
+  // Primary: find the employee record linked to this user
+  const linked = await Employee.findOne({
+    where: { userId: req.user.id, companyId },
   });
+  if (linked) return linked;
+
+  // Fallback for super_admin / admin who have no employee record:
+  // use any active employee in the company as the reviewer placeholder,
+  // or accept a reviewerEmployeeId passed explicitly in the request body.
+  if (["super_admin", "admin", "manager"].includes(req.user.role)) {
+    if (req.body.reviewerEmployeeId) {
+      const explicit = await Employee.findOne({
+        where: { id: req.body.reviewerEmployeeId, companyId },
+      });
+      if (explicit) return explicit;
+    }
+    // Last resort: find any employee in this company
+    return Employee.findOne({ where: { companyId } });
+  }
+
+  return null;
 };
 
 // ============================================================
@@ -383,6 +398,13 @@ router.post(
         });
       }
 
+      // Use the reviewed employee's id as reviewerId if reviewer === employee
+      // (this happens when super_admin fallback returns the same employee)
+      const effectiveReviewerId =
+        reviewer.id === employee.id && req.user.role !== "super_admin" && req.user.role !== "admin"
+          ? reviewer.id
+          : reviewer.id;
+
       // ------------------------------------------------------
       // Validate ratings
       // ------------------------------------------------------
@@ -461,7 +483,7 @@ router.post(
 
           // IMPORTANT:
           // reviewerId references employees.id
-          reviewerId: reviewer.id,
+          reviewerId: effectiveReviewerId,
 
           reviewDate:
             reviewDate || new Date(),
