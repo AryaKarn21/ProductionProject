@@ -5,9 +5,19 @@ export const authAPI = {
   register: (data) => api.post("/auth/register", data),
   verifyOTP: (data) => api.post("/auth/verify-otp", data),
   forgotPassword: (email) => api.post("/auth/forgot-password", { email }),
-  resetPassword: (email, newPassword) =>
-    api.post("/auth/reset-password", { email, newPassword }),
+
+  // The server now also accepts an optional single-use `token`. The OTP
+  // path still works, but the OTP must be unexpired — previously ANY
+  // verified OTP row, including one from signup months earlier, was a
+  // standing permission to reset that account's password.
+  resetPassword: (email, newPassword, token) =>
+    api.post("/auth/reset-password", { email, newPassword, token }),
+
   logout: () => api.post("/auth/logout"),
+
+  // Returns { user: { ..., permissions: ["leads.view", ...] }, companies }.
+  // This was defined but NEVER CALLED, which is why permissions were
+  // frozen at login time and a role change needed a logout to appear.
   getProfile: () => api.get("/auth/me"),
 
   updateProfile: async (data) => {
@@ -15,6 +25,9 @@ export const authAPI = {
     return response.data;
   },
 
+  // This endpoint did not exist server-side until now — the call 404'd.
+  // Body: { currentPassword, newPassword }. Returns a fresh token,
+  // because changing the password signs out every other session.
   changePassword: (data) => api.put("/auth/change-password", data),
 
   uploadAvatar: (file) => {
@@ -25,9 +38,10 @@ export const authAPI = {
     });
   },
 
+  // Also missing server-side until now.
   removeAvatar: () => api.delete("/auth/avatar"),
 
-  // Reuses the existing public /send-otp endpoint to resend a
-  // verification email for the current user.
   resendVerificationEmail: (email) => api.post("/auth/send-otp", { email }),
 };
+
+export default authAPI;

@@ -3,16 +3,16 @@ import { AuditLog } from '../models/index.js'
 /**
  * logEvent
  * ----------------
- * Writes a row to audit_logs. Originally built for the Employee Timeline
- * tab (which always passes resource: 'Employee' implicitly via its own
- * callers), now extended to be the general-purpose audit writer for the
- * whole app — Role changes, User changes, login/logout, etc.
+ * Writes a row to audit_logs.
  *
- * Backward compatible: every new field is optional. Existing callers that
- * only pass { companyId, userId, action, resourceId, changes, ipAddress }
- * (the Employee Timeline call sites) continue to work unchanged — this
- * function still defaults resource to 'Employee' if the caller doesn't
- * specify one, exactly like before.
+ * The module/device/browser/status fields this function has always
+ * passed were silently discarded, because models/AuditLog.js never
+ * declared those columns. That model is now fixed, so these values
+ * finally land in the database and the audit dashboard works.
+ *
+ * Backward compatible: every field is still optional, and `resource`
+ * still defaults to 'Employee' for the original Employee Timeline
+ * call sites.
  */
 export const logEvent = async ({
   companyId,
@@ -26,11 +26,13 @@ export const logEvent = async ({
   device = null,
   browser = null,
   status = 'success',
+  userAgent = null,
+  sessionId = null,
 }) => {
   try {
     return await AuditLog.create({
-      companyId,
-      userId,
+      companyId: companyId || null,
+      userId: userId || null,
       action,
       resource,
       resourceId: resourceId != null ? String(resourceId) : null,
@@ -40,6 +42,8 @@ export const logEvent = async ({
       device,
       browser,
       status,
+      userAgent,
+      sessionId,
     })
   } catch (err) {
     // Audit logging must never break the primary request.
@@ -51,19 +55,20 @@ export const logEvent = async ({
 /**
  * getRequestMeta
  * ----------------
- * Pulls ipAddress/device/browser out of an Express req so route handlers
- * don't have to parse the User-Agent header themselves. Deliberately
- * lightweight (no new npm dependency like ua-parser-js) — good enough to
- * distinguish "Chrome on Windows" from "Safari on iPhone" for the audit UI
- * without adding a package just for this.
+ * Pulls ipAddress/device/browser/userAgent out of an Express req.
+ *
+ * SECURITY NOTE: this previously read the X-Forwarded-For header
+ * directly, which any client can set — so the IP address recorded in
+ * the audit trail was attacker-controlled. Express only populates
+ * `req.ip` from that header when `app.set('trust proxy', ...)` has been
+ * configured, so we now prefer req.ip and fall back to the socket
+ * address. Make sure server.js sets trust proxy to match your actual
+ * deployment (1 behind a single nginx/ALB, false for direct exposure).
  */
 export const getRequestMeta = (req) => {
   const ua = req.headers['user-agent'] || ''
 
-  const ipAddress =
-    req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    null
+  const ipAddress = req.ip || req.socket?.remoteAddress || null
 
   let device = 'Desktop'
   if (/mobile/i.test(ua)) device = 'Mobile'
@@ -75,5 +80,71 @@ export const getRequestMeta = (req) => {
   else if (/firefox\//i.test(ua)) browser = 'Firefox'
   else if (/safari\//i.test(ua) && !/chrome\//i.test(ua)) browser = 'Safari'
 
-  return { ipAddress, device, browser }
+  return {
+    ipAddress,
+    device,
+    browser,
+    userAgent: ua ? String(ua).slice(0, 1000) : null,
+  }
 }
+
+/**
+ * logFromRequest
+ * ----------------
+ * The common case: log an event using the current request for actor,
+ * company and device metadata. Cuts the boilerplate at call sites from
+ * eight lines to one.
+ *
+ *   await logFromRequest(req, {
+ *     action: 'user_role_assigned',
+ *     resource: 'User',
+ *     resourceId: user.id,
+ *     module: 'settings',
+ *     changes: { before, after },
+ *   })
+ */
+export const logFromRequest = async (req, payload = {}) =>
+  logEvent({
+    companyId: payload.companyId ?? req.companyId ?? req.user?.companyId ?? null,
+    userId: payload.userId ?? req.user?.id ?? null,
+    ...getRequestMeta(req),
+    ...payload,
+  })
+
+/**
+ * diffChanges
+ * ----------------
+ * Produces a compact { field: { before, after } } object for the audit
+ * `changes` column, listing only what actually changed. Sensitive
+ * fields are recorded as changed without ever storing their values.
+ */
+const SENSITIVE_FIELDS = new Set([
+  'password',
+  'mfaSecret',
+  'token',
+  'refreshToken',
+  'tokenVersion',
+])
+
+export const diffChanges = (before = {}, after = {}) => {
+  const changes = {}
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
+
+  for (const key of keys) {
+    const b = before?.[key]
+    const a = after?.[key]
+
+    if (JSON.stringify(b) === JSON.stringify(a)) continue
+
+    if (SENSITIVE_FIELDS.has(key)) {
+      changes[key] = { before: '[redacted]', after: '[changed]' }
+      continue
+    }
+
+    changes[key] = { before: b ?? null, after: a ?? null }
+  }
+
+  return changes
+}
+
+export default { logEvent, getRequestMeta, logFromRequest, diffChanges }

@@ -16,6 +16,29 @@ export const LATE_GRACE_MINUTES = 30;
 // the standard 8-hour workday = 4 hours).
 export const HALF_DAY_THRESHOLD_MINUTES = STANDARD_WORK_MINUTES / 2; // 4 hours
 
+// Fallback weekly-off days (0=Sunday ... 6=Saturday) used only when an
+// employee has no shift assigned. Kept in sync with Shift.weeklyOffDays'
+// default. Change here (and in the Shift model default) if your company's
+// standard weekend differs.
+export const DEFAULT_WEEKLY_OFF_DAYS = [6];
+
+/**
+ * Whether `date` falls on a weekly-off day for the given shift (or the
+ * default weekly-off days if no shift/weeklyOffDays is configured).
+ * `date` may be a Date, or a DATEONLY string ("YYYY-MM-DD").
+ */
+export function isWeeklyOff(date, shift) {
+  const d = typeof date === "string" ? new Date(`${date}T00:00:00Z`) : new Date(date);
+  if (Number.isNaN(d.getTime())) return false;
+
+  const dayOfWeek = typeof date === "string" ? d.getUTCDay() : d.getDay();
+  const offDays = Array.isArray(shift?.weeklyOffDays) && shift.weeklyOffDays.length
+    ? shift.weeklyOffDays
+    : DEFAULT_WEEKLY_OFF_DAYS;
+
+  return offDays.includes(dayOfWeek);
+}
+
 function parseTimeToMinutes(t) {
   if (!t) return null;
   const [h, m] = String(t).split(":").map(Number);

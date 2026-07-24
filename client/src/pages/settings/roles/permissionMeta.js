@@ -85,9 +85,50 @@ export const ALL_PERMISSION_KEYS = PERMISSION_MODULES.flatMap((m) => m.permissio
  * array instead of an object, if old data ever slipped through) — this
  * never throws regardless of input shape.
  */
+/**
+ * flattenPermissions
+ * ------------------
+ * The server stores ACTION-level keys — { "leads.view": true,
+ * "leads.create": true } — but this file's matrix is MODULE-level
+ * ({ leads: true }), one checkbox per module.
+ *
+ * Without this conversion every reader here looked up `permissions.leads`,
+ * found nothing, and reported 0 granted — which is why a role with real
+ * permissions still showed "No permissions assigned" and 0/4 coverage.
+ *
+ * A module counts as granted when any of its actions are granted.
+ * Handles all three stored shapes:
+ *
+ *   { "leads.view": true }        -> { leads: true }
+ *   { leads: true }               -> { leads: true }   (legacy, unchanged)
+ *   { leads: { view: true } }     -> { leads: true }   (nested)
+ */
+export function flattenPermissions(permissions) {
+  const flat = {}
+
+  if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
+    return flat
+  }
+
+  for (const [key, value] of Object.entries(permissions)) {
+    const moduleKey = key.split('.')[0]
+
+    if (value === true) {
+      flat[moduleKey] = true
+      continue
+    }
+
+    // Nested: { leads: { view: true, delete: false } }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (Object.values(value).some((v) => v === true)) flat[moduleKey] = true
+    }
+  }
+
+  return flat
+}
+
 export function summarizeByModule(permissions) {
-  const safePermissions =
-    permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : {}
+  const safePermissions = flattenPermissions(permissions)
 
   return PERMISSION_MODULES.map((mod) => {
     const total = mod.permissions.length
@@ -97,7 +138,6 @@ export function summarizeByModule(permissions) {
 }
 
 export function totalGrantedCount(permissions) {
-  const safePermissions =
-    permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : {}
+  const safePermissions = flattenPermissions(permissions)
   return ALL_PERMISSION_KEYS.filter((k) => !!safePermissions[k]).length
 }

@@ -1,15 +1,20 @@
 import { createBrowserRouter } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ProtectedRoute from "./ProtectedRoute";
+import PermissionGuard from "./PermissionGuard";
 import AppShell from "@/components/layout/AppShell";
 import Spinner from "@/components/ui/Spinner";
+
 // ── Eagerly loaded (always needed) ──────────────────────────
 import Login from "@/pages/auth/Login";
 import NotFound from "@/pages/errors/NotFound";
 import Unauthorized from "@/pages/errors/Unauthorized";
-//import Login from '@/pages/auth/Login'
 import NotificationCenter from "@/pages/notifications/NotificationCenter";
-//import Meetings from "@/pages/calendar/Meetings";
+
+// NOTE: you already had an Unauthorized page at @/pages/errors/Unauthorized,
+// so the components/shared/Unauthorized.jsx I sent earlier is redundant —
+// importing both produced a duplicate-identifier SyntaxError. Delete
+// client/src/components/shared/Unauthorized.jsx from the project.
 
 // ── Lazy loaded (only when route is visited) ─────────────────
 const Dashboard = lazy(() => import("@/pages/dashboard/Dashboard"));
@@ -28,7 +33,6 @@ const OpportunitiesList = lazy(
 const OpportunityKanban = lazy(
   () => import("@/pages/crm/opportunities/OpportunityKanban"),
 );
-// const OpportunityKanban    = lazy(() => import('@/pages/crm/opportunities/OpportunityKanban'))
 const OpportunityDetail = lazy(
   () => import("@/pages/crm/opportunities/OpportunityDetail"),
 );
@@ -44,9 +48,15 @@ const EmployeeEdit = lazy(() => import("@/pages/hr/employees/EmployeeEdit"));
 const AttendanceLogs = lazy(
   () => import("@/pages/hr/attendance/AttendanceLogs"),
 );
+const Holidays = lazy(
+  () => import("@/pages/hr/attendance/Holidays"),
+);
+
 const LeaveRequests = lazy(() => import("@/pages/hr/leaves/LeaveRequests"));
 const LeaveEdit = lazy(() => import("@/pages/hr/leaves/LeaveEdit"));
 const PayrollRuns = lazy(() => import("@/pages/hr/payroll/PayrollRuns"));
+const ShiftsPage = lazy(() => import("@/pages/hr/shifts/Shiftspage"));
+
 const FinanceOverview = lazy(
   () => import("@/pages/finance/overview/FinanceOverview"),
 );
@@ -59,10 +69,9 @@ const GeneralLedger = lazy(
 const ExpenseDetails = lazy(
   () => import("@/pages/finance/expenses/ExpenseDetails"),
 );
-
 const EditExpense = lazy(() => import("@/pages/finance/expenses/EditExpense"));
 
-//inventory
+// inventory
 const ItemsList = lazy(() => import("@/pages/inventory/ItemsList"));
 const Warehouses = lazy(() => import("@/pages/inventory/Warehouses"));
 const Assets = lazy(() => import("@/pages/inventory/Assets"));
@@ -91,6 +100,7 @@ const ForgotPassword = lazy(() => import("@/pages/auth/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/auth/ResetPassword"));
 const ProfileSettings = lazy(() => import("@/pages/settings/ProfileSettings"));
 const Calendar = lazy(() => import("@/pages/calendar/Calendar"));
+
 // ── Suspense wrapper ─────────────────────────────────────────
 function PageLoader() {
   return (
@@ -104,7 +114,30 @@ function S({ children }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
 }
 
+/*
+|--------------------------------------------------------------------------
+| G — guarded page helper
+|--------------------------------------------------------------------------
+| Wraps a lazy page in both the permission guard and the Suspense
+| boundary, so each route stays a one-liner instead of four nested tags.
+|
+|   element: G('leads.view', <LeadsList />)
+|
+| Without this, ProtectedRoute (a bare "is there a token?" check) was the
+| only guard in the whole application, and every page — Settings, Payroll,
+| Finance, Users — was reachable just by typing the URL. RoleGuard.jsx
+| existed but was never imported anywhere.
+*/
+function G(permission, element) {
+  return (
+    <PermissionGuard permission={permission}>
+      <S>{element}</S>
+    </PermissionGuard>
+  );
+}
+
 export const router = createBrowserRouter([
+  // ── Public routes ─────────────────────────────────────────
   { path: "/login", element: <Login /> },
 
   {
@@ -135,14 +168,6 @@ export const router = createBrowserRouter([
   },
 
   {
-    path: "/calendar",
-    element: (
-      <S>
-        <Calendar />
-      </S>
-    ),
-  },
-  {
     path: "/reset-password",
     element: (
       <S>
@@ -152,6 +177,8 @@ export const router = createBrowserRouter([
   },
 
   { path: "/unauthorized", element: <Unauthorized /> },
+
+  // ── Authenticated routes ──────────────────────────────────
   {
     element: <ProtectedRoute />,
     children: [
@@ -160,12 +187,11 @@ export const router = createBrowserRouter([
         children: [
           {
             path: "/",
-            element: (
-              <S>
-                <Dashboard />
-              </S>
-            ),
+            element: G("dashboard.view", <Dashboard />),
           },
+
+          // Everyone can see their own notifications, so this one is
+          // intentionally left ungated.
           {
             path: "/notifications",
             element: (
@@ -174,350 +200,212 @@ export const router = createBrowserRouter([
               </S>
             ),
           },
-          // CRM
+
+          // NOTE: /calendar used to sit OUTSIDE ProtectedRoute, at the
+          // top level of this file — meaning it rendered for anyone,
+          // logged in or not. Moved inside and gated.
+          {
+            path: "/calendar",
+            element: G("calendar.view", <Calendar />),
+          },
+
+          // ── CRM ───────────────────────────────────────────
           {
             path: "/crm/leads",
-            element: (
-              <S>
-                <LeadsList />
-              </S>
-            ),
+            element: G("leads.view", <LeadsList />),
           },
           {
             path: "/crm/leads/kanban",
-            element: (
-              <S>
-                <LeadKanban />
-              </S>
-            ),
+            element: G("leads.view", <LeadKanban />),
           },
           {
             path: "/crm/leads/:id",
-            element: (
-              <S>
-                <LeadDetail />
-              </S>
-            ),
+            element: G("leads.view", <LeadDetail />),
           },
           {
             path: "/crm/leads/:id/edit",
-            element: (
-              <S>
-                <LeadEdit />
-              </S>
-            ),
+            element: G("leads.update", <LeadEdit />),
           },
+
           {
             path: "/crm/accounts",
-            element: (
-              <S>
-                <AccountsList />
-              </S>
-            ),
+            element: G("accounts.view", <AccountsList />),
           },
           {
             path: "/crm/accounts/:id",
-            element: (
-              <S>
-                <AccountDetail />
-              </S>
-            ),
+            element: G("accounts.view", <AccountDetail />),
           },
           {
             path: "/crm/accounts/:id/edit",
-            element: (
-              <S>
-                <AccountEdit />
-              </S>
-            ),
+            element: G("accounts.update", <AccountEdit />),
           },
 
           {
             path: "/crm/contacts",
-            element: (
-              <S>
-                <ContactsList />
-              </S>
-            ),
+            element: G("contacts.view", <ContactsList />),
           },
-
           {
             path: "/crm/contacts/:id/edit",
-            element: (
-              <S>
-                <ContactEdit />
-              </S>
-            ),
+            element: G("contacts.update", <ContactEdit />),
           },
 
           {
             path: "/crm/opportunities",
-            element: (
-              <S>
-                <OpportunitiesList />
-              </S>
-            ),
+            element: G("opportunities.view", <OpportunitiesList />),
           },
           {
             path: "/crm/opportunities/kanban",
-            element: (
-              <S>
-                <OpportunityKanban />
-              </S>
-            ),
+            element: G("opportunities.view", <OpportunityKanban />),
           },
           {
             path: "/crm/opportunities/:id",
-            element: (
-              <S>
-                <OpportunityDetail />
-              </S>
-            ),
+            element: G("opportunities.view", <OpportunityDetail />),
           },
           {
             path: "/crm/opportunities/:id/edit",
-            element: (
-              <S>
-                <OpportunityEdit />
-              </S>
-            ),
+            element: G("opportunities.update", <OpportunityEdit />),
           },
 
-          // HR
+          // ── HR ────────────────────────────────────────────
           {
             path: "/hr/employees",
-            element: (
-              <S>
-                <EmployeesList />
-              </S>
-            ),
+            element: G("employees.view", <EmployeesList />),
           },
           {
             path: "/hr/employees/:id",
-            element: (
-              <S>
-                <EmployeeDetail />
-              </S>
-            ),
+            element: G("employees.view", <EmployeeDetail />),
           },
           {
             path: "/hr/employees/:id/edit",
-            element: (
-              <S>
-                <EmployeeEdit />
-              </S>
-            ),
+            element: G("employees.update", <EmployeeEdit />),
           },
           {
             path: "/hr/attendance",
-            element: (
-              <S>
-                <AttendanceLogs />
-              </S>
-            ),
+            element: G("attendance.view", <AttendanceLogs />),
+          },
+
+          {
+            path: "/hr/attendance/holidays",
+            element: G("attendance.view", <Holidays />),
           },
           {
+            path: "/hr/shifts",
+            element: G("attendance.view", <ShiftsPage />),
+          },
+
+
+          {
             path: "/hr/leaves",
-            element: (
-              <S>
-                <LeaveRequests />
-              </S>
-            ),
+            element: G("leave.view", <LeaveRequests />),
           },
           {
             path: "/hr/leaves/:id/edit",
-            element: (
-              <S>
-                <LeaveEdit />
-              </S>
-            ),
+            element: G("leave.update", <LeaveEdit />),
           },
           {
             path: "/hr/payroll",
-            element: (
-              <S>
-                <PayrollRuns />
-              </S>
-            ),
+            element: G("payroll.view", <PayrollRuns />),
           },
 
-          // Finance
+          // ── Finance ───────────────────────────────────────
           {
             path: "/finance",
-            element: (
-              <S>
-                <FinanceOverview />
-              </S>
-            ),
+            element: G("finance.view", <FinanceOverview />),
           },
           {
             path: "/finance/expenses",
-            element: (
-              <S>
-                <ExpensesList />
-              </S>
-            ),
+            element: G("expenses.view", <ExpensesList />),
           },
           {
             path: "/finance/ledger",
-            element: (
-              <S>
-                <GeneralLedger />
-              </S>
-            ),
+            element: G("ledger.view", <GeneralLedger />),
           },
-
           {
             path: "/finance/expenses/:id",
-            element: (
-              <S>
-                <ExpenseDetails />
-              </S>
-            ),
+            element: G("expenses.view", <ExpenseDetails />),
           },
           {
             path: "/finance/expenses/:id/edit",
-            element: (
-              <S>
-                <EditExpense />
-              </S>
-            ),
+            element: G("expenses.update", <EditExpense />),
           },
 
-          // Other modules
+          // ── Inventory ─────────────────────────────────────
           {
             path: "/inventory",
-            element: (
-              <S>
-                <ItemsList />
-              </S>
-            ),
+            element: G("inventory.view", <ItemsList />),
           },
           {
             path: "/inventory/warehouses",
-            element: (
-              <S>
-                <Warehouses />
-              </S>
-            ),
+            element: G("warehouse.view", <Warehouses />),
           },
           {
             path: "/inventory/assets",
-            element: (
-              <S>
-                <Assets />
-              </S>
-            ),
+            element: G("assets.view", <Assets />),
           },
-
           {
             path: "/inventory/transfers",
-            element: (
-              <S>
-                <StockTransfers />
-              </S>
-            ),
+            element: G("transfers.view", <StockTransfers />),
           },
-
           {
             path: "/inventory/adjustments",
-            element: (
-              <S>
-                <StockAdjustments />
-              </S>
-            ),
+            element: G("adjustments.view", <StockAdjustments />),
           },
 
+          // ── Procurement ───────────────────────────────────
           {
             path: "/procurement",
-            element: (
-              <S>
-                <PurchaseOrders />
-              </S>
-            ),
+            element: G("procurement.view", <PurchaseOrders />),
           },
-          // Procurement
           {
             path: "/procurement/orders/:id",
-            element: (
-              <S>
-                <PurchaseDetails />
-              </S>
-            ),
+            element: G("procurement.view", <PurchaseDetails />),
           },
           {
             path: "/procurement/orders/:id/edit",
-            element: (
-              <S>
-                <PurchaseEdit />
-              </S>
-            ),
+            element: G("procurement.update", <PurchaseEdit />),
           },
 
+          // ── Projects ──────────────────────────────────────
           {
             path: "/projects",
-            element: (
-              <S>
-                <ProjectsList />
-              </S>
-            ),
+            element: G("projects.view", <ProjectsList />),
           },
           {
             path: "/projects/:id",
-            element: (
-              <S>
-                <ProjectDetail />
-              </S>
-            ),
+            element: G("projects.view", <ProjectDetail />),
           },
           {
             path: "/projects/:id/edit",
-            element: (
-              <S>
-                <ProjectEdit />
-              </S>
-            ),
+            element: G("projects.update", <ProjectEdit />),
           },
+
+          // ── Support ───────────────────────────────────────
           {
             path: "/support",
-            element: (
-              <S>
-                <TicketsList />
-              </S>
-            ),
+            element: G("support.view", <TicketsList />),
           },
           {
             path: "/support/:id",
-            element: (
-              <S>
-                <SupportDetail />
-              </S>
-            ),
+            element: G("support.view", <SupportDetail />),
           },
           {
             path: "/support/:id/edit",
-            element: (
-              <S>
-                <SupportEdit />
-              </S>
-            ),
+            element: G("support.update", <SupportEdit />),
           },
+
+          // ── Reports ───────────────────────────────────────
           {
             path: "/reports",
-            element: (
-              <S>
-                <Analytics />
-              </S>
-            ),
+            element: G("analytics.view", <Analytics />),
           },
+
+          // ── Settings ──────────────────────────────────────
           {
             path: "/settings",
-            element: (
-              <S>
-                <Settings />
-              </S>
-            ),
+            element: G("settings.view", <Settings />),
           },
+
+          // Editing your own profile needs no permission.
           {
             path: "/settings/profile",
             element: (
@@ -526,22 +414,14 @@ export const router = createBrowserRouter([
               </S>
             ),
           },
-          {
-            path: "/settings/users/:id",
-            element: (
-              <S>
-                <UserDetails />
-              </S>
-            ),
-          },
 
           {
+            path: "/settings/users/:id",
+            element: G("users.view", <UserDetails />),
+          },
+          {
             path: "/settings/users/:id/edit",
-            element: (
-              <S>
-                <UserEdit />
-              </S>
-            ),
+            element: G("users.update", <UserEdit />),
           },
         ],
       },

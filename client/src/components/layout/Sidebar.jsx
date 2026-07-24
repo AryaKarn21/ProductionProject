@@ -60,7 +60,6 @@ const NAV = [
       },
     ],
   },
-
   {
     label: 'Human Resources',
     icon: Users,
@@ -73,6 +72,11 @@ const NAV = [
       {
         label: 'Attendance',
         to: '/hr/attendance',
+        permission: 'attendance.view',
+      },
+      {
+        label: 'Holidays',
+        to: '/hr/attendance/holidays',
         permission: 'attendance.view',
       },
       {

@@ -1,11 +1,3 @@
-// This file wires up every relationship that used to be a Mongoose
-// `ref: 'Model'` field. Sequelize uses these associations to power
-// `include` (the equivalent of `.populate()`).
-//
-// IMPORTANT: this file must be imported once, after all models are
-// defined, and before sequelize.sync() / any queries run. It is
-// imported from server.js.
-
 import Company from "./Company.js";
 import User from "./User.js";
 import Meeting from "./Meeting.js";
@@ -23,6 +15,7 @@ import Attendance from "./Attendance.js";
 import Shift from "./Shift.js";
 import Leave from "./Leave.js";
 import LeaveType from "./LeaveType.js";
+import Holiday from "./Holiday.js";
 import PayrollRun from "./PayrollRun.js";
 import Payslip from "./Payslip.js";
 import Expense from "./Expense.js";
@@ -99,6 +92,32 @@ User.belongsTo(Role, {
   as: "roleInfo",
   foreignKey: "roleId",
 });
+
+// ── Role hierarchy ─────────────────────────────────────
+// A child role inherits every permission its parent grants.
+// resolveRolePermissions() in middleware/auth.js walks this chain.
+Role.belongsTo(Role, { as: "parent", foreignKey: "parentRoleId" });
+Role.hasMany(Role, { as: "children", foreignKey: "parentRoleId" });
+
+// ── UserCompany (membership + per-company role) ────────
+// The belongsToMany above gives you user.companies, but it does not
+// expose the join row itself. protect() in middleware/auth.js needs
+// that row so it can read user_companies.roleId and work out which
+// role this user holds in the company they are currently working in.
+//
+// WITHOUT THIS BLOCK every authenticated request throws
+// SequelizeEagerLoadingError, protect() turns it into a 401, and the
+// axios interceptor logs the user straight back out — which looks
+// exactly like "login succeeds but returns to the login page".
+//
+// NOTE: the Company alias here is "companyRef", not "company",
+// because "company" is already taken by User.belongsTo(Company) above
+// and Sequelize rejects a duplicate alias in the same query.
+User.hasMany(UserCompany, { as: "memberships", foreignKey: "userId" });
+UserCompany.belongsTo(User, { as: "user", foreignKey: "userId" });
+UserCompany.belongsTo(Company, { as: "companyRef", foreignKey: "companyId" });
+UserCompany.belongsTo(Role, { as: "role", foreignKey: "roleId" });
+Role.hasMany(UserCompany, { as: "memberships", foreignKey: "roleId" });
 
 // Company → Meetings
 Company.hasMany(Meeting, {
@@ -196,6 +215,7 @@ LeadNote.belongsTo(User, { as: "createdBy", foreignKey: "createdById" });
 // ── Employee ──────────────────────────────────────────────
 Employee.belongsTo(Company, { foreignKey: "companyId" });
 Employee.belongsTo(User, { as: "user", foreignKey: "userId" });
+User.hasOne(Employee, { as: "employee", foreignKey: "userId" });
 Employee.hasMany(EmployeeDocument, {
   as: "documents",
   foreignKey: "employeeId",
@@ -311,6 +331,10 @@ Leave.belongsTo(Company, { foreignKey: "companyId" });
 Leave.belongsTo(Employee, { as: "employee", foreignKey: "employeeId" });
 Leave.belongsTo(User, { as: "approvedBy", foreignKey: "approvedById" });
 LeaveType.belongsTo(Company, { foreignKey: "companyId" });
+
+// ── Holiday ───────────────────────────────────────────────
+Holiday.belongsTo(Company, { foreignKey: "companyId" });
+Company.hasMany(Holiday, { as: "holidays", foreignKey: "companyId" });
 
 // ── Payroll ───────────────────────────────────────────────
 PayrollRun.belongsTo(Company, { foreignKey: "companyId" });
@@ -473,6 +497,7 @@ const allModels = [
   Shift,
   Leave,
   LeaveType,
+  Holiday,
   PayrollRun,
   Payslip,
   Expense,
@@ -529,6 +554,7 @@ export {
   Shift,
   Leave,
   LeaveType,
+  Holiday,
   PayrollRun,
   Payslip,
   Expense,

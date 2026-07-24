@@ -1,10 +1,29 @@
 import express from "express";
 import { Op } from "sequelize";
-import { PayrollRun, Payslip, Employee } from "../models/index.js";
+import { PayrollRun, Payslip, Employee, Attendance } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
 import { generatePayslipPDF } from "../reports/payslipReport.js";
 
 const router = express.Router();
+
+// `period` is a free-text string like "July 2026" (see POST /runs below).
+// If it parses to a real month, we can look up that month's Attendance rows
+// and deduct unpaid absent days. If it doesn't parse (e.g. a custom label),
+// we skip the deduction entirely and behave exactly as before — this is a
+// pure addition, not a change to any existing payroll math.
+function resolvePeriodDateRange(period) {
+  const parsed = new Date(period);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const year = parsed.getFullYear();
+  const month = parsed.getMonth();
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0); // last day of month
+  const daysInMonth = end.getDate();
+
+  const toDateOnly = (d) => d.toISOString().slice(0, 10);
+  return { from: toDateOnly(start), to: toDateOnly(end), daysInMonth };
+}
 
 // FIXED: was reading req.headers['x-company-id'], which the frontend
 // never sends — always resolved to null, meaning every payroll run ever
@@ -99,12 +118,44 @@ router.post("/runs/:id/process", protect, async (req, res, next) => {
 
     let grossTotal = 0, deductionsTotal = 0, netTotal = 0;
 
+    // If the period maps to a real calendar month, pull that month's absent
+    // days per employee so payroll reflects the automatic Absent status.
+    // If it doesn't parse, absentDaysByEmployee stays empty and every
+    // employee gets 0 unpaidAbsentDays/absentDeduction — identical to the
+    // pre-existing behavior.
+    const range = resolvePeriodDateRange(run.period);
+    const absentDaysByEmployee = new Map();
+
+    if (range) {
+      const absentRows = await Attendance.findAll({
+        where: {
+          companyId: company,
+          employeeId: { [Op.in]: employees.map((e) => e.id) },
+          status: "absent",
+          date: { [Op.between]: [range.from, range.to] },
+        },
+        attributes: ["employeeId"],
+      });
+      for (const row of absentRows) {
+        absentDaysByEmployee.set(
+          row.employeeId,
+          (absentDaysByEmployee.get(row.employeeId) || 0) + 1,
+        );
+      }
+    }
+
     const payslipRows = employees.map((emp) => {
       const basicSalary = Number(emp.salary) || 0;
       const allowances = basicSalary * 0.1;
       const grossPay = basicSalary + allowances;
       const tax = grossPay * 0.13; // flat rate — see note below on making this configurable
-      const deductions = tax;
+
+      const unpaidAbsentDays = absentDaysByEmployee.get(emp.id) || 0;
+      const absentDeduction = range && unpaidAbsentDays
+        ? Math.round((basicSalary / range.daysInMonth) * unpaidAbsentDays * 100) / 100
+        : 0;
+
+      const deductions = tax + absentDeduction;
       const netPay = grossPay - deductions;
 
       grossTotal += grossPay;
@@ -117,6 +168,7 @@ router.post("/runs/:id/process", protect, async (req, res, next) => {
         payrollRunId: run.id,
         period: run.period,
         basicSalary, allowances, deductions, tax, netPay, grossPay,
+        unpaidAbsentDays, absentDeduction,
         processedAt: new Date(),
       };
     });

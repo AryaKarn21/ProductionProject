@@ -26,9 +26,15 @@ import {
   FileText,
   ClipboardList,
   Download,
+  Laptop,
+  Package,
+  Monitor,
+  Tag,
+  Unlink,
 } from "lucide-react";
 
 import { employeesAPI } from "@/api/employees.api";
+import { inventoryAPI } from "@/api/inventory.api";
 import { performanceAPI } from "@/api/performance.api";
 import { shiftsAPI } from "@/api/shifts.api";
 
@@ -37,7 +43,6 @@ import Badge from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
 import StatCard from "@/components/shared/StatCard";
-import ChartWidget from "@/components/shared/ChartWidget";
 import { Tabs } from "@/components/ui/Tabs";
 
 import { classifyStatus, formatCurrency, formatDate } from "@/lib/utils";
@@ -168,6 +173,8 @@ export default function EmployeeDetail() {
   const [reviewForm, setReviewForm] = useState(emptyReview);
   const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState("");
+  const [assetModalOpen, setAssetModalOpen] = useState(false);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
   const [reportForm, setReportForm] = useState({
     reportDate: new Date().toISOString().slice(0, 10),
     title: "",
@@ -260,13 +267,58 @@ export default function EmployeeDetail() {
 
   const assignShiftMutation = useMutation({
     mutationFn: (shiftId) => employeesAPI.assignShift(id, shiftId || null),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Shift updated");
-      queryClient.invalidateQueries({ queryKey: ["employee", id] });
+      await queryClient.invalidateQueries({ queryKey: ["employee", id] });
+      await queryClient.refetchQueries({ queryKey: ["employee", id] });
       queryClient.invalidateQueries({ queryKey: ["employee-timeline", id] });
       setShiftModalOpen(false);
     },
     onError: (err) => toast.error(err?.response?.data?.message || "Failed to update shift"),
+  });
+
+  // ── Assets ───────────────────────────────────────────────
+  const { data: assignedAssets } = useQuery({
+    queryKey: ["employee-assets", id],
+    queryFn: async () => {
+      const res = await inventoryAPI.getAssets({ assignedToId: id });
+      return Array.isArray(res.data) ? res.data : res.data?.assets || [];
+    },
+    enabled: activeTab === "assets",
+  });
+
+  const { data: availableAssetsData } = useQuery({
+    queryKey: ["available-assets"],
+    queryFn: async () => {
+      const res = await inventoryAPI.getAssets({ status: "available" });
+      return Array.isArray(res.data) ? res.data : res.data?.assets || [];
+    },
+    enabled: assetModalOpen,
+  });
+  const availableAssets = availableAssetsData || [];
+
+  const assignAssetMutation = useMutation({
+    mutationFn: (assetId) =>
+      inventoryAPI.updateAsset(assetId, { assignedToId: id, status: "assigned" }),
+    onSuccess: () => {
+      toast.success("Asset assigned");
+      queryClient.invalidateQueries({ queryKey: ["employee-assets", id] });
+      queryClient.invalidateQueries({ queryKey: ["available-assets"] });
+      setAssetModalOpen(false);
+      setSelectedAssetId("");
+    },
+    onError: (err) => toast.error(err?.response?.data?.message || "Failed to assign asset"),
+  });
+
+  const unassignAssetMutation = useMutation({
+    mutationFn: (assetId) =>
+      inventoryAPI.updateAsset(assetId, { assignedToId: null, status: "available" }),
+    onSuccess: () => {
+      toast.success("Asset unassigned");
+      queryClient.invalidateQueries({ queryKey: ["employee-assets", id] });
+      queryClient.invalidateQueries({ queryKey: ["available-assets"] });
+    },
+    onError: (err) => toast.error(err?.response?.data?.message || "Failed to unassign asset"),
   });
 
   // const createReview = useMutation({
@@ -369,22 +421,9 @@ export default function EmployeeDetail() {
     { key: "documents", label: "Documents" },
     { key: "reports", label: "Daily Reports", count: dailyReports?.reports?.length },
     { key: "performance", label: "Performance", count: stats?.performance?.totalReviews ?? 0 },
+    { key: "assets", label: "Assets", count: assignedAssets?.length ?? undefined },
     { key: "timeline", label: "Timeline" },
   ];
-
-  // Group last-30 attendance records by month for the trend chart
-  const monthlyAttendance = (() => {
-    const records = attendanceData?.attendance || [];
-    const buckets = {};
-    records.forEach((r) => {
-      const d = new Date(r.date);
-      const key = d.toLocaleString("default", { month: "short", year: "2-digit" });
-      if (!buckets[key]) buckets[key] = { month: key, present: 0, absent: 0 };
-      if (r.status === "present" || r.status === "half_day") buckets[key].present += 1;
-      if (r.status === "absent") buckets[key].absent += 1;
-    });
-    return Object.values(buckets).reverse();
-  })();
 
   const timeInput = (val) =>
     val ? new Date(val).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -448,30 +487,33 @@ export default function EmployeeDetail() {
                 </div>
               </div>
 
-              {/* Buttons: stretch + wrap on mobile, natural width on desktop */}
-              <div className="flex flex-wrap gap-2 sm:gap-3">
+              {/* Buttons: grid layout */}
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-3 w-full xl:w-auto">
                 <button
                   onClick={handleExport}
-                  className="btn btn-secondary flex items-center justify-center gap-2 flex-1 xl:flex-none"
+                  className="btn btn-secondary flex items-center justify-center gap-2"
                 >
                   <Download size={16} /> Export History
                 </button>
 
-                href={`mailto:${employee.email}`}
-                className="btn btn-secondary flex-1 xl:flex-none text-center"
-                Send Email
+                <a
+                  href={`mailto:${employee.email}`}
+                  className="btn btn-secondary flex items-center justify-center gap-2"
+                >
+                  <Mail size={16} /> Send Email
+                </a>
                 <button
                   onClick={() => {
                     setSelectedShiftId(employee.shiftId || employee.shift?.id || "");
                     setShiftModalOpen(true);
                   }}
-                  className="btn btn-secondary flex items-center justify-center gap-2 flex-1 xl:flex-none"
+                  className="btn btn-secondary flex items-center justify-center gap-2"
                 >
                   <Clock size={16} /> Assign Shift
                 </button>
                 <button
                   onClick={() => navigate(`/hr/employees/${employee.id}/edit`)}
-                  className="btn btn-primary flex-1 xl:flex-none"
+                  className="btn btn-primary"
                 >
                   Edit Employee
                 </button>
@@ -591,20 +633,6 @@ export default function EmployeeDetail() {
                       Summary figures reflect the current calendar month.
                     </p>
 
-                    <SectionCard title="Recent Attendance Trend">
-                      <div className="p-6">
-                        <ChartWidget
-                          type="apex-bar"
-                          title=""
-                          xKey="month"
-                          dataKey="present"
-                          color="#16a34a"
-                          height={280}
-                          data={monthlyAttendance}
-                        />
-                      </div>
-                    </SectionCard>
-
                     <SectionCard title="Attendance History (last 30 records)">
                       <div className="overflow-x-auto">
                         <table className="data-table">
@@ -653,6 +681,7 @@ export default function EmployeeDetail() {
                       <StatCard title="Pending" value={stats?.leave?.pending ?? 0} icon={AlertCircle} color="warning" />
                       <StatCard title="Rejected" value={stats?.leave?.rejected ?? 0} icon={XCircle} color="danger" />
                     </div>
+                    {/* Leave trend chart removed */}
 
                     <SectionCard title="Leave History">
                       <div className="overflow-x-auto">
@@ -981,30 +1010,15 @@ export default function EmployeeDetail() {
                 )}
 
                 {/* ================= PERFORMANCE ================= */}
-                {/* {activeTab === "performance" && (
+                {activeTab === "performance" && (
                   <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                        Performance Reviews
-                      </h2>
-                      <button
-                        className="btn btn-primary flex items-center gap-2"
-                        onClick={() => {
-                          setReviewForm(emptyReview);
-                          setReviewModalOpen(true);
-                        }}
-                      >
-                        <Plus size={16} /> New Review
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4">
                       <StatCard
                         title="Average Rating"
                         value={
                           <StarRating
-                            value={performanceData?.averageRating ?? 0}
-                            count={performanceData?.total ?? 0}
+                            value={stats?.performance?.averageRating ?? 0}
+                            count={stats?.performance?.totalReviews ?? 0}
                             size={16}
                           />
                         }
@@ -1013,79 +1027,143 @@ export default function EmployeeDetail() {
                       />
                       <StatCard
                         title="Total Reviews"
-                        value={performanceData?.total ?? 0}
+                        value={stats?.performance?.totalReviews ?? 0}
                         icon={TrendingUp}
                         color="info"
                       />
                     </div>
-
-                    <div className="space-y-4">
-                      {(performanceData?.reviews || []).length ? (
-                        performanceData.reviews.map((review) => (
-                          <div key={review.id} className="card p-6 space-y-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <h3 className="font-semibold text-[15px]" style={{ color: "var(--text-primary)" }}>
-                                  {review.reviewPeriod}
-                                </h3>
-                                <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-                                  Reviewed {formatDate(review.reviewDate)}
-                                  {review.reviewer ? ` by ${review.reviewer.firstName} ${review.reviewer.lastName}` : ""}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                {review.promotionEligible && (
-                                  <Badge variant="success" dot>
-                                    <TrendingUp size={12} className="inline mr-1" /> Promotion Eligible
-                                  </Badge>
-                                )}
-                                <div className="text-right">
-                                  <p className="text-[11px] mb-1" style={{ color: "var(--text-muted)" }}>Overall</p>
-                                  <StarRating value={review.overallRating} count={1} size={15} />
-                                </div>
-                              </div>
-                            </div>
-
-                            <div
-                              className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-4 border-t"
-                              style={{ borderColor: "var(--border)" }}
-                            >
-                              {RATING_FIELDS.map(([label, key]) => (
-                                <div key={key} className="text-center">
-                                  <p className="text-[11px] mb-1" style={{ color: "var(--text-muted)" }}>{label}</p>
-                                  <StarRating value={review[key]} count={1} size={11} showValue={false} />
-                                </div>
-                              ))}
-                            </div>
-
-                            {review.strengths && (
-                              <ReviewNote label="Strengths" text={review.strengths} />
-                            )}
-                            {review.weaknesses && (
-                              <ReviewNote label="Areas to Improve" text={review.weaknesses} />
-                            )}
-                            {review.managerFeedback && (
-                              <ReviewNote label="Manager Feedback" text={review.managerFeedback} />
-                            )}
-                            {review.employeeFeedback && (
-                              <ReviewNote label="Employee Feedback / Goals" text={review.employeeFeedback} />
-                            )}
-                            {review.salaryIncrementRecommendation != null && (
-                              <ReviewNote
-                                label="Recommended Increment"
-                                text={`${review.salaryIncrementRecommendation}%`}
-                              />
-                            )}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="card p-10 text-center" style={{ color: "var(--text-muted)" }}>
-                          No performance reviews recorded yet. Click "New Review" to add the first one.
-                        </div>
-                      )}
+                    <div className="card p-10 text-center" style={{ color: "var(--text-muted)" }}>
+                      <TrendingUp size={32} className="mx-auto mb-3 opacity-30" />
+                      <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>No performance reviews yet</p>
+                      <p className="text-[12px] mt-1">Performance reviews will appear here once submitted.</p>
                     </div>
                   </div>
-                )} */}
+                )}
+
+                {/* ================= ASSETS ================= */}
+                {activeTab === "assets" && (
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                          Assigned Assets
+                        </h2>
+                        <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+                          Laptops, monitors, and other equipment assigned to this employee.
+                        </p>
+                      </div>
+                      <button
+                        className="btn btn-primary flex items-center gap-2"
+                        onClick={() => setAssetModalOpen(true)}
+                      >
+                        <Plus size={16} /> Assign Asset
+                      </button>
+                    </div>
+
+                    {/* Summary stat */}
+                    {(assignedAssets || []).length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {["laptop", "monitor", "phone", "other"].map((cat) => {
+                          const count = (assignedAssets || []).filter(
+                            (a) => (a.category || "other").toLowerCase() === cat
+                          ).length;
+                          if (count === 0) return null;
+                          const Icon = cat === "laptop" ? Laptop : cat === "monitor" ? Monitor : cat === "phone" ? Phone : Package;
+                          return (
+                            <div
+                              key={cat}
+                              className="flex items-center gap-3 rounded-xl p-3 border"
+                              style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}
+                            >
+                              <span className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--primary-10, rgba(59,130,246,.12))" }}>
+                                <Icon size={15} style={{ color: "var(--primary)" }} />
+                              </span>
+                              <div>
+                                <p className="text-[11px] capitalize" style={{ color: "var(--text-muted)" }}>{cat}</p>
+                                <p className="text-[14px] font-bold" style={{ color: "var(--text-primary)" }}>{count}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="card overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Asset</th>
+                              <th>Category</th>
+                              <th>Code</th>
+                              <th>Serial No.</th>
+                              <th>Purchase Date</th>
+                              <th>Status</th>
+                              <th className="text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(assignedAssets || []).length ? (
+                              assignedAssets.map((asset) => (
+                                <tr key={asset.id}>
+                                  <td>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                        style={{ background: "var(--surface-2)" }}
+                                      >
+                                        {(asset.category || "").toLowerCase() === "laptop"
+                                          ? <Laptop size={13} style={{ color: "var(--primary)" }} />
+                                          : (asset.category || "").toLowerCase() === "monitor"
+                                          ? <Monitor size={13} style={{ color: "var(--info)" }} />
+                                          : <Package size={13} style={{ color: "var(--text-muted)" }} />}
+                                      </span>
+                                      <span className="font-medium text-[13px]" style={{ color: "var(--text-primary)" }}>
+                                        {asset.name}
+                                        {asset.brand ? <span className="text-[11px] ml-1" style={{ color: "var(--text-muted)" }}>({asset.brand})</span> : null}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span className="flex items-center gap-1">
+                                      <Tag size={11} style={{ color: "var(--text-muted)" }} />
+                                      {asset.category || "—"}
+                                    </span>
+                                  </td>
+                                  <td className="font-mono text-[12px]">{asset.assetCode || "—"}</td>
+                                  <td className="font-mono text-[12px]">{asset.serialNumber || "—"}</td>
+                                  <td>{asset.purchaseDate ? formatDate(asset.purchaseDate) : "—"}</td>
+                                  <td>
+                                    <Badge variant="info">assigned</Badge>
+                                  </td>
+                                  <td>
+                                    <div className="flex justify-end">
+                                      <button
+                                        className="btn btn-danger btn-sm flex items-center gap-1"
+                                        onClick={() => unassignAssetMutation.mutate(asset.id)}
+                                        disabled={unassignAssetMutation.isPending}
+                                      >
+                                        <Unlink size={12} /> Unassign
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={7} className="text-center py-14" style={{ color: "var(--text-muted)" }}>
+                                  <Laptop size={28} className="mx-auto mb-2 opacity-20" />
+                                  <p className="text-[13px]">No assets assigned yet.</p>
+                                  <p className="text-[11px] mt-1">Click "Assign Asset" to add one.</p>
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* ================= TIMELINE ================= */}
                 {activeTab === "timeline" && (
@@ -1180,6 +1258,40 @@ export default function EmployeeDetail() {
                 <MiniStat label="Reviews" value={stats?.performance?.totalReviews ?? 0} />
                 <MiniStat label="Avg. Rating" value={stats?.performance?.averageRating ?? 0} />
               </div>
+            </div>
+
+            {/* Assets quick-view sidebar card */}
+            <div className="card p-5 sm:p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Assets
+                </h2>
+                <button
+                  className="btn btn-secondary btn-sm flex items-center gap-1"
+                  onClick={() => setAssetModalOpen(true)}
+                >
+                  <Plus size={12} /> Assign
+                </button>
+              </div>
+              {(assignedAssets || []).length ? (
+                <div className="space-y-2">
+                  {assignedAssets.slice(0, 4).map((a) => (
+                    <div key={a.id} className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded flex items-center justify-center shrink-0" style={{ background: "var(--surface-2)" }}>
+                        {(a.category || "").toLowerCase() === "laptop"
+                          ? <Laptop size={11} style={{ color: "var(--primary)" }} />
+                          : <Package size={11} style={{ color: "var(--text-muted)" }} />}
+                      </span>
+                      <span className="text-[12px] truncate" style={{ color: "var(--text-secondary)" }}>{a.name}</span>
+                    </div>
+                  ))}
+                  {assignedAssets.length > 4 && (
+                    <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>+{assignedAssets.length - 4} more</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No assets assigned.</p>
+              )}
             </div>
           </div>
         </div>
@@ -1374,6 +1486,55 @@ export default function EmployeeDetail() {
           </div>
         </div>
       </Modal> */}
+
+      {/* ================= ASSIGN ASSET MODAL ================= */}
+      <Modal
+        open={assetModalOpen}
+        onClose={() => { setAssetModalOpen(false); setSelectedAssetId(""); }}
+        title="Assign Asset"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button className="btn btn-ghost" onClick={() => { setAssetModalOpen(false); setSelectedAssetId(""); }}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              disabled={assignAssetMutation.isPending || !selectedAssetId}
+              onClick={() => assignAssetMutation.mutate(selectedAssetId)}
+            >
+              {assignAssetMutation.isPending ? "Assigning…" : "Assign"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 p-1">
+          <p className="text-[12.5px]" style={{ color: "var(--text-secondary)" }}>
+            Choose an available asset to assign to <strong>{employee?.firstName} {employee?.lastName}</strong>.
+          </p>
+          <div>
+            <label className="text-[13px] font-medium block mb-1" style={{ color: "var(--text-secondary)" }}>
+              Available Asset
+            </label>
+            <select
+              className="input w-full"
+              value={selectedAssetId}
+              onChange={(e) => setSelectedAssetId(e.target.value)}
+            >
+              <option value="">Select an asset…</option>
+              {availableAssets.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}{a.brand ? ` — ${a.brand}` : ""}{a.assetCode ? ` (${a.assetCode})` : ""}
+                  {a.category ? ` · ${a.category}` : ""}
+                </option>
+              ))}
+            </select>
+            {availableAssets.length === 0 && (
+              <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+                No available assets found. Add assets from the Inventory → Assets module.
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

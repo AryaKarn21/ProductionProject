@@ -504,11 +504,33 @@ export default function EmployeesList() {
                   {...register("confirmationDate")}
                 />
               </div>
-              <input
-                className="input"
-                placeholder="e.g. EMP-001"
-                {...register("employeeId")}
-              />
+
+              {/* Employee ID — auto-assigned by server, shown as read-only preview */}
+              <div className="form-group">
+                <label className="form-label">Employee ID</label>
+                <div className="relative">
+                  <input
+                    readOnly
+                    className="input pr-20 opacity-70 cursor-not-allowed"
+                    value={(() => {
+                      const list = data?.employees || [];
+                      if (!list.length) return "EMP0001";
+                      const nums = list
+                        .map((e) => {
+                          const m = String(e.employeeId || "").match(/^EMP(\d+)$/);
+                          return m ? Number(m[1]) : 0;
+                        })
+                        .filter(Boolean);
+                      const next = nums.length ? Math.max(...nums) + 1 : 1;
+                      return `EMP${String(next).padStart(4, "0")}`;
+                    })()}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                    Auto
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Automatically assigned on save. Cannot be changed.</p>
+              </div>
             </div>
           </div>
         </div>

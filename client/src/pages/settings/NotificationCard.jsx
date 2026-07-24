@@ -103,7 +103,7 @@ export default function NotificationCard() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {ROWS.map((row) => (
                 <NotificationRow
                   key={row.key}

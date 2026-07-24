@@ -5,7 +5,6 @@ import {
   TrendingUp,
   Users,
   Activity,
-  BarChart3,
   Target,
   Download,
 } from "lucide-react";
@@ -16,7 +15,7 @@ import StatCard from "@/components/shared/StatCard";
 import ChartWidget from "@/components/shared/ChartWidget";
 import { formatCurrency } from "@/lib/utils";
 
-// Small helper so every panel shares the same header treatment.
+// Helper header treatment for dashboard panels
 function PanelHeader({ title, subtitle, icon: Icon, iconClass }) {
   return (
     <div className="flex items-start justify-between gap-3 mb-4 sm:mb-5">
@@ -45,7 +44,7 @@ function ChartSkeleton() {
   );
 }
 
-// Renders a labelled progress bar (used by Pipeline and Lead Sources).
+// Progress row for pipeline and lead sources
 function ProgressRow({ label, valueText, percent, barColor }) {
   return (
     <div>
@@ -90,24 +89,68 @@ export default function Analytics() {
     queryFn: () => reportsAPI.getRevenueByMonth(year).then((res) => res.data),
   });
 
-  const { data: salesData, isLoading: salesLoading } = useQuery({
-    queryKey: ["sales-report"],
-    queryFn: () => reportsAPI.getSalesReport().then((res) => res.data),
-  });
-
   const { data: forecastData, isLoading: forecastLoading } = useQuery({
     queryKey: ["sales-forecast"],
     queryFn: () => reportsAPI.getSalesForecast().then((res) => res.data),
   });
 
-  // /reports/sales returns a bare array; guard anyway in case it changes.
-  const salesRows = Array.isArray(salesData) ? salesData : salesData?.data || [];
   const revenueRows = revenueData?.data || [];
   const forecastRows = forecastData?.data || [];
   const pipeline = Array.isArray(data?.pipeline) ? data.pipeline : [];
   const leadSources = Array.isArray(data?.leadSources) ? data.leadSources : [];
 
-  // Client-side CSV so Export works without a new backend endpoint.
+  // ================= APEXCHARTS CONFIG OPTIONS =================
+  const revenueChartOptions = {
+    chart: {
+      type: "area",
+      toolbar: { show: true, tools: { download: true, zoom: true, pan: true, reset: true } },
+      zoom: { enabled: true },
+      animations: { enabled: true, easing: "easeinout", speed: 800 },
+    },
+    stroke: { curve: "smooth", width: 3 },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.45,
+        opacityTo: 0.05,
+        stops: [0, 90, 100],
+      },
+    },
+    colors: ["#10B981"], // Emerald Green accent
+    dataLabels: { enabled: false },
+    tooltip: {
+      theme: "dark",
+      y: { formatter: (val) => formatCurrency(val) },
+    },
+    grid: { borderColor: "var(--border)", strokeDashArray: 4 },
+  };
+
+  const forecastChartOptions = {
+    chart: {
+      type: "area",
+      toolbar: { show: false },
+      animations: { enabled: true, speed: 600 },
+    },
+    stroke: { curve: "stepline", width: 2 },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.5,
+        opacityTo: 0.1,
+      },
+    },
+    colors: ["#F59E0B"], // Amber Gold
+    dataLabels: { enabled: false },
+    tooltip: {
+      theme: "dark",
+      y: { formatter: (val) => formatCurrency(val) },
+    },
+    grid: { borderColor: "var(--border)", strokeDashArray: 4 },
+  };
+
+  // Export handling
   const handleExport = () => {
     try {
       const esc = (v) => {
@@ -140,12 +183,6 @@ export default function Analytics() {
           "REVENUE BY MONTH",
           ["Month", "Revenue"],
           revenueRows.map((r) => [r.month, r.revenue])
-        ),
-        "",
-        section(
-          "DEALS BY STAGE",
-          ["Stage", "Count"],
-          salesRows.map((r) => [r.stage, r.count])
         ),
         "",
         section(
@@ -272,28 +309,31 @@ export default function Analytics() {
           ))}
         </div>
 
-        {/* ================= REVENUE & DEALS ================= */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+        {/* ================= MAIN DASHBOARD GRID ================= */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          
+          {/* Revenue Trend Area Chart */}
           <div
-            className="card p-4 sm:p-6 rounded-2xl shadow-sm border overflow-hidden"
+            className="card p-4 sm:p-6 rounded-2xl shadow-sm border overflow-hidden lg:col-span-2"
             style={{ borderColor: "var(--border)" }}
           >
             <PanelHeader
               title="Revenue Trend"
-              subtitle={`Monthly revenue for ${year}`}
+              subtitle={`Monthly revenue performance for ${year}`}
               icon={TrendingUp}
-              iconClass="text-green-500"
+              iconClass="text-emerald-500"
             />
             {revenueLoading ? (
               <ChartSkeleton />
             ) : revenueRows.length ? (
               <ChartWidget
-                type="apex-line"
+                type="apex-area"
                 title=""
                 data={revenueRows}
                 dataKey="revenue"
                 xKey="month"
-                height={300}
+                height={320}
+                options={revenueChartOptions}
                 formatter={(v) => formatCurrency(v)}
               />
             ) : (
@@ -303,37 +343,7 @@ export default function Analytics() {
             )}
           </div>
 
-          <div
-            className="card p-4 sm:p-6 rounded-2xl shadow-sm border overflow-hidden"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <PanelHeader
-              title="Deals by Stage"
-              subtitle="Opportunities grouped by stage"
-              icon={BarChart3}
-              iconClass="text-blue-500"
-            />
-            {salesLoading ? (
-              <ChartSkeleton />
-            ) : salesRows.length ? (
-              <ChartWidget
-                type="apex-bar"
-                title=""
-                data={salesRows}
-                dataKey="count"
-                xKey="stage"
-                height={300}
-              />
-            ) : (
-              <div className="py-12 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
-                No opportunity data available.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ================= FORECAST & PIPELINE ================= */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+          {/* Sales Forecast Chart */}
           <div
             className="card p-4 sm:p-6 rounded-2xl shadow-sm border overflow-hidden"
             style={{ borderColor: "var(--border)" }}
@@ -353,8 +363,8 @@ export default function Analytics() {
                 data={forecastRows}
                 dataKey="forecast"
                 xKey="month"
-                height={300}
-                color="#f59e0b"
+                height={280}
+                options={forecastChartOptions}
                 formatter={(v) => formatCurrency(v)}
               />
             ) : (
@@ -364,6 +374,7 @@ export default function Analytics() {
             )}
           </div>
 
+          {/* Pipeline Stage Column */}
           <div
             className="card p-4 sm:p-6 rounded-2xl shadow-sm border"
             style={{ borderColor: "var(--border)" }}
@@ -375,7 +386,7 @@ export default function Analytics() {
               iconClass="text-purple-500"
             />
             {pipeline.length ? (
-              <div className="space-y-4">
+              <div className="space-y-4 pt-2">
                 {pipeline.map((stage, index) => (
                   <ProgressRow
                     key={index}
@@ -392,36 +403,37 @@ export default function Analytics() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* ================= LEAD SOURCES ================= */}
-        <div
-          className="card p-4 sm:p-6 rounded-2xl shadow-sm border"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <PanelHeader
-            title="Lead Sources"
-            subtitle="Leads generated from different channels"
-            icon={Users}
-            iconClass="text-indigo-500"
-          />
-          {leadSources.length ? (
-            <div className="space-y-4 sm:space-y-5">
-              {leadSources.map((source, index) => (
-                <ProgressRow
-                  key={index}
-                  label={source.source}
-                  valueText={`${source.count} Leads`}
-                  percent={source.percent}
-                  barColor="var(--success)"
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="py-12 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
-              No lead source data available.
-            </div>
-          )}
+          {/* Lead Sources */}
+          <div
+            className="card p-4 sm:p-6 rounded-2xl shadow-sm border lg:col-span-2"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <PanelHeader
+              title="Lead Sources"
+              subtitle="Leads generated from different channels"
+              icon={Users}
+              iconClass="text-indigo-500"
+            />
+            {leadSources.length ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 pt-2">
+                {leadSources.map((source, index) => (
+                  <ProgressRow
+                    key={index}
+                    label={source.source}
+                    valueText={`${source.count} Leads`}
+                    percent={source.percent}
+                    barColor="var(--success)"
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="py-12 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
+                No lead source data available.
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>

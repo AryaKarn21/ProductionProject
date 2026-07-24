@@ -3,12 +3,19 @@ import { Op } from "sequelize";
 import { Meeting, MeetingAttendee, User } from "../models/index.js";
 import { notifyUsers } from "./notification.service.js";
 import { sendMeetingReminderEmail } from "./emailNotification.service.js";
+import { runDailyAttendanceFinalization } from "./attendanceFinalization.service.js";
 
 // Runs once a minute. Cron granularity is per-minute, so this is the
 // tightest useful interval — a meeting's reminderMinutes (5, 10, 15, 30,
 // 60, 1440) will fire within ~60 seconds of the intended time, not exactly
 // on the second.
 const CRON_EXPRESSION = "* * * * *";
+
+// Runs once a day, 15 minutes after midnight (server time), and finalizes
+// yesterday's attendance: any employee with no valid attendance/check-in
+// record for a scheduled working day gets marked "absent". Previously this
+// job did not exist at all, which is why Absent records were never created.
+const ATTENDANCE_FINALIZATION_CRON_EXPRESSION = "15 0 * * *";
 
 async function processMeetingReminders() {
   const now = new Date();
@@ -89,6 +96,18 @@ export function startScheduler() {
   });
 
   console.log("✅ Meeting reminder scheduler started (checks every minute)");
+
+  cron.schedule(ATTENDANCE_FINALIZATION_CRON_EXPRESSION, async () => {
+    try {
+      const results = await runDailyAttendanceFinalization();
+      const totalMarked = results.reduce((sum, r) => sum + (r.marked || 0), 0);
+      console.log(`✅ Daily attendance finalization complete — ${totalMarked} employee(s) marked absent.`);
+    } catch (err) {
+      console.error("Attendance finalization scheduler error:", err);
+    }
+  });
+
+  console.log("✅ Attendance finalization scheduler started (runs daily at 00:15)");
 }
 
 /**

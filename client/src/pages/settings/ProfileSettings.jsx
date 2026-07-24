@@ -12,7 +12,13 @@ import ActivityCard from "./ActivityCard";
 export default function ProfileSettings() {
   const { data: user, isLoading, error } = useQuery({
     queryKey: ["profile"],
-    queryFn: () => authAPI.getProfile().then((res) => res.data),
+    // GET /auth/me responds with { user, companies, memberships }, not the
+    // user record itself. Every card below (ProfileHeader, EmployeeSummary,
+    // AccountCard, SecurityCard, ...) expects a flat user object, so the
+    // nested `.user` must be unwrapped here. Without this, every field in
+    // the whole page reads as undefined (blank name, blank avatar, "No
+    // Company", employee summary stuck on "Not Assigned").
+    queryFn: () => authAPI.getProfile().then((res) => res.data.user),
   });
 
   if (isLoading) {

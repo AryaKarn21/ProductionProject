@@ -43,6 +43,110 @@ const buildCSV = (rows) =>
     ...rows.map((r) => CSV_COLUMNS.map((c) => csvEscape(r[c])).join(",")),
   ].join("\n");
 
+/*
+|--------------------------------------------------------------------------
+| GET /api/employees/picker
+|--------------------------------------------------------------------------
+| Slim list for the "Select Employee" dropdown in Settings -> Users -> Add User.
+|
+| Deliberately NOT a new resource — it reuses the Employee model and the
+| tenant scope already applied by resolveCompany. It returns only the six
+| fields the dropdown needs, so the picker does not ship salary, bank
+| details and tax numbers to the browser the way GET /employees would.
+|
+| Query params:
+|   companyId   optional. Super admins may target a specific company;
+|               everyone else is pinned to their own by the check below.
+|   unlinked    'true' (default) hides employees who already have a CRM
+|               login, so you cannot create a second account for someone.
+|   search      matches first name, last name, email or employee code.
+|
+| SECURITY: companyId from the query is never trusted on its own. A
+| non-super-admin asking for another company gets 403.
+*/
+router.get("/picker", async (req, res, next) => {
+  try {
+    const requested = req.query.companyId;
+
+    let companyId = req.companyId;
+
+    if (requested) {
+      const isMember =
+        req.user.role === "super_admin" ||
+        String(requested) === String(req.companyId) ||
+        (req.memberships || []).some(
+          (m) => String(m.companyId) === String(requested)
+        );
+
+      if (!isMember) {
+        return res
+          .status(403)
+          .json({ message: "You do not have access to that company." });
+      }
+      companyId = requested;
+    }
+
+    if (!companyId) {
+      return res.status(400).json({ message: "A company must be selected." });
+    }
+
+    const where = { companyId, status: "active" };
+
+    // Only offer people who do not already have a CRM login.
+    if (req.query.unlinked !== "false") {
+      where.userId = null;
+    }
+
+    if (req.query.search) {
+      const q = `%${req.query.search}%`;
+      where[Op.or] = [
+        { firstName: { [Op.like]: q } },
+        { lastName: { [Op.like]: q } },
+        { email: { [Op.like]: q } },
+        { employeeId: { [Op.like]: q } },
+      ];
+    }
+
+    const employees = await Employee.findAll({
+      where,
+      attributes: [
+        "id",
+        "employeeId",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "department",
+        "designation",
+        "userId",
+      ],
+      order: [
+        ["firstName", "ASC"],
+        ["lastName", "ASC"],
+      ],
+      limit: 500,
+    });
+
+    res.json({
+      employees: employees.map((e) => ({
+        id: e.id,
+        employeeCode: e.employeeId,
+        name: [e.firstName, e.lastName].filter(Boolean).join(" "),
+        email: e.email,
+        phone: e.phone,
+        department: e.department,
+        // The HR job title. This is NOT the CRM permission role — the two
+        // are independent, so assigning a role never touches it.
+        designation: e.designation,
+        hasAccount: !!e.userId,
+      })),
+      total: employees.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // RFC-4180-ish parser: handles quoted fields, embedded commas, escaped quotes, newlines.
 const parseCSV = (text) => {
   const rows = [];

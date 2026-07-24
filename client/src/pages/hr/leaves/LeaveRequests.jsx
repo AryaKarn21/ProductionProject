@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { Plus, Check, X as XIcon, Ban, Calendar } from "lucide-react";
+import { Plus, Check, X as XIcon, Ban, Calendar, Building2 } from "lucide-react";
 import { leavesAPI } from "@/api/leaves.api";
 import { employeesAPI } from "@/api/employees.api";
+import { useAuthStore } from "@/store/auth.store";
 import DataTable from "@/components/shared/DataTable";
 import FilterBar from "@/components/shared/FilterBar";
 import Badge from "@/components/ui/Badge";
@@ -23,15 +24,13 @@ const leaveSchema = z
     endDate: z.string().min(1, "End date is required"),
     reason: z.string().min(5, "Please provide a reason (min 5 chars)"),
   })
-  .refine((d) => !d.startDate || !d.endDate || new Date(d.endDate) >= new Date(d.startDate), {
-    message: "End date can't be before the start date",
-    path: ["endDate"],
-  });
+  .refine(
+    (d) => !d.startDate || !d.endDate || new Date(d.endDate) >= new Date(d.startDate),
+    { message: "End date can't be before the start date", path: ["endDate"] }
+  );
 
 const LEAVE_TYPES = ["Annual", "Sick", "Casual", "Maternity", "Paternity", "Unpaid", "Emergency"];
 
-// Backend status values are lowercase (matches the Leave model's ENUM) — the
-// filter always sends/compares lowercase; only the on-screen label is capitalized.
 const LEAVE_STATUS = [
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
@@ -46,6 +45,17 @@ const STATUS_VARIANT = {
   cancelled: "gray",
 };
 
+// Leave type color map for visual variety
+const TYPE_VARIANT = {
+  Annual: "info",
+  Sick: "warning",
+  Casual: "success",
+  Maternity: "purple",
+  Paternity: "blue",
+  Unpaid: "gray",
+  Emergency: "danger",
+};
+
 function calcDays(startDate, endDate) {
   if (!startDate || !endDate) return null;
   const start = new Date(startDate);
@@ -58,16 +68,15 @@ export default function LeaveRequests() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const [params, setParams] = useState({
-    page: 1,
-    limit: 20,
-    search: "",
-    status: "",
-    leaveType: "",
-  });
+  // ── Company name ────────────────────────────────────────────────────────
+  const { user, activeCompany, companies } = useAuthStore();
+  const companyName =
+    (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
+    user?.companyName ||
+    "Your Company";
+
+  const [params, setParams] = useState({ page: 1, limit: 20, search: "", status: "", leaveType: "" });
   const [modalOpen, setModalOpen] = useState(false);
-  // Tracks which row's approve/reject/cancel mutation is in flight, so only
-  // that row's buttons show a busy state instead of the whole table.
   const [pendingRowId, setPendingRowId] = useState(null);
 
   const { data, isLoading, error } = useQuery({
@@ -83,20 +92,11 @@ export default function LeaveRequests() {
   const employees = empData?.employees || [];
 
   const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
+    register, handleSubmit, reset, watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(leaveSchema),
-    defaultValues: {
-      employeeId: "",
-      leaveType: "",
-      startDate: "",
-      endDate: "",
-      reason: "",
-    },
+    defaultValues: { employeeId: "", leaveType: "", startDate: "", endDate: "", reason: "" },
   });
 
   const watchStart = watch("startDate");
@@ -140,6 +140,12 @@ export default function LeaveRequests() {
     onSettled: () => setPendingRowId(null),
   });
 
+  // ── Summary KPIs ───────────────────────────────────────────────────────
+  const leaves = data?.leaves || [];
+  const total = data?.total || 0;
+  const pendingCount = leaves.filter((l) => l.status === "pending").length;
+  const approvedCount = leaves.filter((l) => l.status === "approved").length;
+
   const renderActions = (row) => {
     const busy = pendingRowId === row.id;
     return (
@@ -151,7 +157,6 @@ export default function LeaveRequests() {
         >
           Edit
         </button>
-
         {row.status === "pending" && (
           <>
             <button
@@ -162,7 +167,6 @@ export default function LeaveRequests() {
             >
               <Check size={13} /> Approve
             </button>
-
             <button
               className="btn btn-sm btn-ghost flex items-center gap-1"
               style={{ color: "var(--danger)" }}
@@ -173,14 +177,11 @@ export default function LeaveRequests() {
             </button>
           </>
         )}
-
         {(row.status === "pending" || row.status === "approved") && (
           <button
             className="btn btn-sm btn-ghost flex items-center gap-1"
             style={{ color: "var(--text-muted)" }}
-            onClick={() => {
-              if (window.confirm("Cancel this leave request?")) cancelMutation.mutate(row.id);
-            }}
+            onClick={() => { if (window.confirm("Cancel this leave request?")) cancelMutation.mutate(row.id); }}
             disabled={busy}
           >
             <Ban size={13} /> Cancel
@@ -192,8 +193,7 @@ export default function LeaveRequests() {
 
   const columns = [
     {
-      key: "employee",
-      label: "Employee",
+      key: "employee", label: "Employee",
       render: (val) =>
         val ? (
           <div className="flex items-center gap-2">
@@ -207,30 +207,20 @@ export default function LeaveRequests() {
               </p>
             </div>
           </div>
-        ) : (
-          "—"
-        ),
+        ) : "—",
     },
     {
-      key: "leaveType",
-      label: "Type",
-      render: (val) => <Badge variant="info">{val || "—"}</Badge>,
+      key: "leaveType", label: "Type",
+      render: (val) => <Badge variant={TYPE_VARIANT[val] || "info"}>{val || "—"}</Badge>,
     },
-    {
-      key: "startDate",
-      label: "Start",
-      sortable: true,
-      render: (val) => formatDate(val),
-    },
+    { key: "startDate", label: "Start", sortable: true, render: (val) => formatDate(val) },
     { key: "endDate", label: "End", render: (val) => formatDate(val) },
     {
-      key: "days",
-      label: "Days",
-      render: (val) => <span className="font-medium">{val ?? "—"}</span>,
+      key: "days", label: "Days",
+      render: (val) => <span className="font-semibold">{val ?? "—"}</span>,
     },
     {
-      key: "status",
-      label: "Status",
+      key: "status", label: "Status",
       render: (val = "pending") => (
         <Badge variant={STATUS_VARIANT[val] || "gray"} dot>
           {val.charAt(0).toUpperCase() + val.slice(1)}
@@ -239,17 +229,25 @@ export default function LeaveRequests() {
     },
   ];
 
-  const leaves = data?.leaves || [];
-  const total = data?.total || 0;
-
   return (
     <div className="animate-fade-in">
+      {/* ── Header ── */}
       <div className="page-header flex-wrap gap-3">
         <div>
-          <h1 className="text-[18px] font-bold" style={{ color: "var(--text-primary)" }}>
-            Leave Requests
-          </h1>
-          <p className="text-[12px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+          <div className="flex items-center gap-2 mb-0.5">
+            <h1 className="text-[18px] font-bold" style={{ color: "var(--text-primary)" }}>
+              Leave Requests
+            </h1>
+            {/* Company name */}
+            <span
+              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+              style={{ background: "var(--surface-2)", color: "var(--text-muted)" }}
+            >
+              <Building2 size={11} />
+              {companyName}
+            </span>
+          </div>
+          <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
             {total} request{total === 1 ? "" : "s"}
           </p>
         </div>
@@ -259,6 +257,20 @@ export default function LeaveRequests() {
         >
           <Plus size={14} /> Request Leave
         </button>
+      </div>
+
+      {/* ── KPI Bar ── */}
+      <div className="mx-4 sm:mx-6 mt-1 mb-4 grid grid-cols-3 gap-3">
+        {[
+          { label: "Total", value: total, color: "var(--primary)" },
+          { label: "Pending", value: pendingCount, color: "#f59e0b" },
+          { label: "Approved", value: approvedCount, color: "#22c55e" },
+        ].map((k) => (
+          <div key={k.label} className="card px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{k.label}</p>
+            <p className="text-[22px] font-bold" style={{ color: k.color }}>{k.value}</p>
+          </div>
+        ))}
       </div>
 
       <FilterBar
@@ -271,7 +283,7 @@ export default function LeaveRequests() {
         onChange={(k, v) => setParams((p) => ({ ...p, [k]: v, page: 1 }))}
       />
 
-      {/* ================= DESKTOP / TABLET: TABLE ================= */}
+      {/* ── Table (desktop) ── */}
       <div className="mx-4 sm:mx-6 mb-6 card overflow-hidden hidden sm:block">
         <DataTable
           columns={columns}
@@ -289,14 +301,11 @@ export default function LeaveRequests() {
         />
       </div>
 
-      {/* ================= MOBILE: CARDS ================= */}
+      {/* ── Cards (mobile) ── */}
       <div className="mx-4 mb-6 space-y-3 sm:hidden">
         {isLoading ? (
           <div className="card flex items-center justify-center py-16">
-            <div
-              className="w-8 h-8 border-4 rounded-full animate-spin"
-              style={{ borderColor: "var(--border)", borderTopColor: "var(--primary)" }}
-            />
+            <div className="w-8 h-8 border-4 rounded-full animate-spin" style={{ borderColor: "var(--border)", borderTopColor: "var(--primary)" }} />
           </div>
         ) : error ? (
           <div className="card text-center py-16 px-4" style={{ color: "var(--danger)" }}>
@@ -305,89 +314,65 @@ export default function LeaveRequests() {
         ) : leaves.length === 0 ? (
           <div className="card flex flex-col items-center justify-center text-center py-14 px-6">
             <Calendar size={26} style={{ color: "var(--text-muted)" }} className="mb-3" />
-            <p className="font-medium text-[13px]" style={{ color: "var(--text-primary)" }}>
-              No leave requests
-            </p>
-            <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>
-              Leave requests from employees will appear here
-            </p>
+            <p className="font-medium text-[13px]" style={{ color: "var(--text-primary)" }}>No leave requests</p>
+            <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>Leave requests from employees will appear here</p>
           </div>
         ) : (
           leaves.map((row) => (
             <div key={row.id} className="card p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <Avatar
-                    src={row.employee?.avatar}
-                    name={row.employee ? `${row.employee.firstName} ${row.employee.lastName}` : "—"}
-                    size="sm"
-                  />
+                  <Avatar src={row.employee?.avatar} name={row.employee ? `${row.employee.firstName} ${row.employee.lastName}` : "—"} size="sm" />
                   <div className="min-w-0">
                     <p className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
                       {row.employee ? `${row.employee.firstName} ${row.employee.lastName}` : "—"}
                     </p>
-                    <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
-                      {row.employee?.department || "—"}
-                    </p>
+                    <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>{row.employee?.department || "—"}</p>
                   </div>
                 </div>
                 <Badge variant={STATUS_VARIANT[row.status] || "gray"} dot>
                   {(row.status || "pending").replace(/^\w/, (c) => c.toUpperCase())}
                 </Badge>
               </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-y-1.5 gap-x-2 text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                <span className="flex items-center gap-1">
-                  <Badge variant="info" className="!py-0">{row.leaveType || "—"}</Badge>
-                </span>
+              <div className="mt-3 grid grid-cols-2 gap-y-1.5 text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                <span><Badge variant={TYPE_VARIANT[row.leaveType] || "info"} className="!py-0">{row.leaveType || "—"}</Badge></span>
                 <span className="text-right font-medium">{row.days ?? "—"} day{row.days === 1 ? "" : "s"}</span>
-                <span className="col-span-2">
-                  {formatDate(row.startDate)} — {formatDate(row.endDate)}
-                </span>
+                <span className="col-span-2">{formatDate(row.startDate)} — {formatDate(row.endDate)}</span>
               </div>
-
               <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
                 {renderActions(row)}
               </div>
             </div>
           ))
         )}
-
         {total > params.limit && (
           <div className="flex items-center justify-center gap-3 pt-2">
-            <button
-              className="btn btn-sm btn-secondary"
-              disabled={params.page <= 1}
-              onClick={() => setParams((p) => ({ ...p, page: p.page - 1 }))}
-            >
-              Previous
-            </button>
-            <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-              Page {params.page} of {Math.ceil(total / params.limit)}
-            </span>
-            <button
-              className="btn btn-sm btn-secondary"
-              disabled={params.page >= Math.ceil(total / params.limit)}
-              onClick={() => setParams((p) => ({ ...p, page: p.page + 1 }))}
-            >
-              Next
-            </button>
+            <button className="btn btn-sm btn-secondary" disabled={params.page <= 1} onClick={() => setParams((p) => ({ ...p, page: p.page - 1 }))}>Previous</button>
+            <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>Page {params.page} of {Math.ceil(total / params.limit)}</span>
+            <button className="btn btn-sm btn-secondary" disabled={params.page >= Math.ceil(total / params.limit)} onClick={() => setParams((p) => ({ ...p, page: p.page + 1 }))}>Next</button>
           </div>
         )}
       </div>
 
+      {/* ── Request Leave Modal ── */}
       <FormModal
         open={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          reset();
-        }}
+        onClose={() => { setModalOpen(false); reset(); }}
         title="Request Leave"
         onSubmit={handleSubmit((d) => createMutation.mutate(d))}
         loading={createMutation.isPending}
         submitLabel="Submit Request"
       >
         <div className="flex flex-col gap-4">
+          {/* Company context */}
+          <div
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px]"
+            style={{ background: "var(--surface-2)", color: "var(--text-muted)" }}
+          >
+            <Building2 size={13} />
+            <span>Submitting leave for <strong style={{ color: "var(--text-primary)" }}>{companyName}</strong></span>
+          </div>
+
           <div className="form-group">
             <label className="form-label">Employee *</label>
             <select className="input" {...register("employeeId")}>
@@ -398,60 +383,49 @@ export default function LeaveRequests() {
                 </option>
               ))}
             </select>
-            {errors.employeeId && (
-              <p className="text-[11px] text-red-500 mt-1">{errors.employeeId.message}</p>
-            )}
+            {errors.employeeId && <p className="text-[11px] text-red-500 mt-1">{errors.employeeId.message}</p>}
           </div>
 
           <div className="form-group">
             <label className="form-label">Leave Type *</label>
             <select className="input" {...register("leaveType")}>
               <option value="">Select type</option>
-              {LEAVE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
+              {LEAVE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            {errors.leaveType && (
-              <p className="text-[11px] text-red-500 mt-1">{errors.leaveType.message}</p>
-            )}
+            {errors.leaveType && <p className="text-[11px] text-red-500 mt-1">{errors.leaveType.message}</p>}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="form-group">
               <label className="form-label">Start Date *</label>
               <input className="input" type="date" {...register("startDate")} />
-              {errors.startDate && (
-                <p className="text-[11px] text-red-500 mt-1">{errors.startDate.message}</p>
-              )}
+              {errors.startDate && <p className="text-[11px] text-red-500 mt-1">{errors.startDate.message}</p>}
             </div>
             <div className="form-group">
               <label className="form-label">End Date *</label>
               <input className="input" type="date" min={watchStart || undefined} {...register("endDate")} />
-              {errors.endDate && (
-                <p className="text-[11px] text-red-500 mt-1">{errors.endDate.message}</p>
-              )}
+              {errors.endDate && <p className="text-[11px] text-red-500 mt-1">{errors.endDate.message}</p>}
             </div>
           </div>
 
+          {/* Live days preview */}
           {previewDays !== null && (
-            <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-              This request covers <strong>{previewDays}</strong> day{previewDays === 1 ? "" : "s"}.
-            </p>
+            <div
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px]"
+              style={{ background: "rgba(99,102,241,0.08)", color: "var(--primary, #6366f1)" }}
+            >
+              <Calendar size={13} />
+              <span>
+                This request covers <strong>{previewDays}</strong> day{previewDays === 1 ? "" : "s"}
+                {previewDays > 5 && <span className="ml-1" style={{ color: "var(--text-muted)" }}>(over a week)</span>}
+              </span>
+            </div>
           )}
 
           <div className="form-group">
             <label className="form-label">Reason *</label>
-            <textarea
-              className="input"
-              rows={3}
-              placeholder="Why are you requesting leave?"
-              {...register("reason")}
-            />
-            {errors.reason && (
-              <p className="text-[11px] text-red-500 mt-1">{errors.reason.message}</p>
-            )}
+            <textarea className="input" rows={3} placeholder="Why are you requesting leave?" {...register("reason")} />
+            {errors.reason && <p className="text-[11px] text-red-500 mt-1">{errors.reason.message}</p>}
           </div>
         </div>
       </FormModal>

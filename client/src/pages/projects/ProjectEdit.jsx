@@ -37,6 +37,7 @@ export default function ProjectEdit() {
         startDate: project.startDate?.split('T')[0],
         endDate: project.endDate?.split('T')[0],
         budget: project.budget,
+         progress: project.progress,
       })
     }
   }, [project, reset])
@@ -89,7 +90,27 @@ export default function ProjectEdit() {
         </div>
 
       </div>
+        <div className="form-group">
+  <label className="form-label">
+    Progress (%)
+  </label>
 
+  <input
+    type="number"
+    min="0"
+    max="100"
+    className="input"
+    {...register("progress", {
+      valueAsNumber: true,
+    })}
+  />
+
+  {errors.progress && (
+    <p className="text-red-500 text-xs">
+      {errors.progress.message}
+    </p>
+  )}
+</div>
       <div className="card p-6 mx-6">
 
         <form

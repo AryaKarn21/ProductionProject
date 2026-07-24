@@ -61,7 +61,7 @@ export default function SecurityCard({ user }) {
     const next = {};
     if (!form.currentPassword) next.currentPassword = "Current password is required";
     if (!form.newPassword) next.newPassword = "New password is required";
-    else if (form.newPassword.length < 6) next.newPassword = "Must be at least 6 characters";
+    else if (form.newPassword.length < 8) next.newPassword = "Must be at least 8 characters";
     if (form.confirmPassword !== form.newPassword) next.confirmPassword = "Passwords don't match";
     setErrors(next);
     return Object.keys(next).length === 0;

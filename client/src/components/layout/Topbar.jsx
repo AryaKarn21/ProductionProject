@@ -1,4 +1,4 @@
-import { Search, Sun, Moon, Plus, Command, Menu } from "lucide-react";
+import { Search, Sun, Moon, Plus, Command } from "lucide-react";
 import { useUIStore } from "@/store/ui.store";
 import { useAuthStore } from "@/store/auth.store";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,6 +30,9 @@ export default function Topbar() {
     toast.success("Company switched successfully");
   };
 
+  // Get avatar URL from user object (checking common property names)
+  const avatarUrl = user?.avatarUrl || user?.avatar || user?.profileImage || user?.image;
+
   return (
     <header
       className="fixed top-0 right-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-6 z-20 border-b transition-all duration-300"
@@ -37,16 +40,11 @@ export default function Topbar() {
         height: "var(--topbar-height)",
         background: "var(--surface)",
         borderColor: "var(--border)",
-        // On mobile the sidebar is an off-canvas drawer, not a permanent
-        // column — the topbar spans the full width like the content does.
-        // A left padding reserves room for the floating hamburger button
-        // that Sidebar.jsx renders at top-left so they don't overlap.
         left: isMobile ? 0 : sidebarCollapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)",
         paddingLeft: isMobile ? "3.25rem" : undefined,
       }}
     >
-      {/* Global Search — full flexible width on desktop, shrinks on mobile
-          so it doesn't crowd out the icons on the right */}
+      {/* Global Search */}
       <button
         onClick={openCommandPalette}
         className="flex items-center gap-2 px-2.5 sm:px-3 py-2 rounded-lg border text-[13px] flex-1 max-w-sm text-left transition-colors min-w-0"
@@ -68,8 +66,7 @@ export default function Topbar() {
       </button>
 
       <div className="flex items-center gap-1.5 sm:gap-2 ml-auto shrink-0">
-        {/* Company switcher — hidden on phones (already in the sidebar's
-            CompanySwitcher); shown from sm up where there's room */}
+        {/* Company switcher */}
         {companies.length > 0 && (
           <select
             value={activeCompany || ""}
@@ -89,7 +86,7 @@ export default function Topbar() {
           </select>
         )}
 
-        {/* Quick Create — icon-only on phones, label from sm up */}
+        {/* Quick Create */}
         <button className="btn btn-primary btn-sm px-2.5 sm:px-3">
           <Plus size={14} />
           <span className="hidden sm:inline">New</span>
@@ -103,15 +100,24 @@ export default function Topbar() {
         {/* Notifications */}
         <NotificationBell />
 
-        {/* Profile */}
+        {/* Profile Avatar Button */}
         <div className="relative">
           <button
             onClick={() => setProfileOpen((o) => !o)}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0 overflow-hidden"
             style={{ background: "var(--primary)" }}
           >
-            {user?.name?.[0]?.toUpperCase() || "U"}
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={user?.name || "Profile"}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              user?.name?.[0]?.toUpperCase() || "U"
+            )}
           </button>
+
           {profileOpen && (
             <div
               className="absolute right-0 top-full mt-2 w-52 rounded-xl border shadow-lg py-1 z-50 animate-fade-in"

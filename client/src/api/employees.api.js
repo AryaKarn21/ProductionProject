@@ -2,6 +2,20 @@ import api from "./axios";
 
 export const employeesAPI = {
   getAll: (params) => api.get("/employees", { params }),
+
+  /**
+   * Slim employee list for the "Select Employee" dropdown in
+   * Settings -> Users -> Add User.
+   *
+   * Reuses the Employee model behind GET /api/employees/picker rather
+   * than shipping the full employee payload (salary, bank details, tax
+   * numbers) to a dropdown.
+   *
+   * @param {object} params { companyId, search, unlinked }
+   *   unlinked defaults to true server-side, hiding anyone who already
+   *   has a CRM login.
+   */
+  getForUserPicker: (params) => api.get('/employees/picker', { params }),
   getById: (id) => api.get(`/employees/${id}`),
   getMe: () => api.get("/employees/me"),
   create: (data) => api.post("/employees", data),

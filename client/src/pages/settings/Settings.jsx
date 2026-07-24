@@ -10,6 +10,7 @@ import Avatar from '@/components/ui/Avatar'
 import { useForm } from 'react-hook-form'
 import { formatDate } from '@/lib/utils'
 import RoleFormModal from './RoleFormModel'
+import UserFormModal from './users/UserFormModal'
 import toast from 'react-hot-toast'
 import { useEffect } from 'react'
 //import CompanyTable from '@/components/settings/CompanyTable'
@@ -306,12 +307,6 @@ function CompanyTab() {
 function UsersTab() {
   const [showDialog, setShowDialog] = useState(false)
   const queryClient = useQueryClient()
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm()
   const [params, setParams] = useState({ page: 1, limit: 10 })
   const navigate = useNavigate()
   const { data, isLoading } = useQuery({
@@ -319,22 +314,14 @@ function UsersTab() {
     queryFn: () => settingsAPI.getUsers(params).then(r => r.data),
   })
 
-  const createUserMutation = useMutation({
-    mutationFn: (data) => settingsAPI.createUser(data),
-    onSuccess: () => {
-      toast.success('User created successfully')
-      queryClient.invalidateQueries({ queryKey: ['settings-users'] })
-      reset()
-      setShowDialog(false)
-    },
-    onError: (err) => {
-      toast.error(err.response?.data?.message || 'Unable to create user')
-    },
-  })
-
-  const onSubmit = (data) => {
-    createUserMutation.mutate(data)
-  }
+  // The Add User form now lives in ./users/UserFormModal.jsx, which owns
+  // its own react-hook-form state and mutation. It was moved out because
+  // it needed two new fields — Company and Permission Role — and keeping
+  // that inline made this file harder to work in.
+  //
+  // The old inline version had no company selector at all, so every user
+  // it created ended up with companyId = null and could not be scoped to
+  // any tenant.
 
   const deactivateMutation = useMutation({
     mutationFn: (id) => settingsAPI.deactivateUser(id),
@@ -358,7 +345,27 @@ function UsersTab() {
       ),
     },
     {
-      key: 'role', label: 'Role',
+      // Which company this person is an employee of. GET /settings/users
+      // now returns `company`, so a super admin browsing across tenants
+      // can tell at a glance who belongs where.
+      key: 'company', label: 'Company',
+      render: (val, row) => (
+        <span className="text-[13px]" style={{ color: 'var(--text-primary)' }}>
+          {val?.name || row.companies?.[0]?.name || '-'}
+        </span>
+      ),
+    },
+    {
+      // The RBAC role — what the permission matrix actually controls.
+      // There was previously no way to see it anywhere in the UI.
+      key: 'roleInfo', label: 'Permission Role',
+      render: (val) =>
+        val?.name
+          ? <Badge variant="success">{val.name}</Badge>
+          : <Badge variant="gray">No role</Badge>,
+    },
+    {
+      key: 'role', label: 'System Role',
       render: (val) => <Badge variant="info">{val?.replace('_', ' ')}</Badge>,
     },
     {
@@ -413,79 +420,33 @@ function UsersTab() {
         emptyTitle="No users found"
       />
 
-      {showDialog && (
-        <div
-          className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ background: "rgba(0,0,0,.5)" }}
-        >
-          <div className="card w-[500px] p-6">
-            <h2 className="text-xl font-bold mb-5">Add User</h2>
-
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <label>Name</label>
-                <input
-                  className="input w-full"
-                  {...register('name', { required: 'Name is required' })}
-                />
-                {errors.name && <p className="text-red-500 text-xs">{errors.name.message}</p>}
-              </div>
-
-              <div>
-                <label>Email</label>
-                <input
-                  type="email"
-                  className="input w-full"
-                  {...register('email', { required: 'Email is required' })}
-                />
-              </div>
-
-              <div>
-                <label>Password</label>
-                <input
-                  type="password"
-                  className="input w-full"
-                  {...register('password', { required: 'Password is required' })}
-                />
-              </div>
-
-              <div>
-                <label>Phone</label>
-                <input className="input w-full" {...register('phone')} />
-              </div>
-
-              <div>
-                <label>Role</label>
-                <select className="input w-full" {...register('role')}>
-                  <option value="employee">Employee</option>
-                  <option value="manager">Manager</option>
-                  <option value="accountant">Accountant</option>
-                  <option value="admin">Admin</option>
-                  <option value="super_admin">Super Admin</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    reset()
-                    setShowDialog(false)
-                  }}
-                >
-                  Cancel
-                </button>
-                <button className="btn btn-primary" disabled={createUserMutation.isPending}>
-                  {createUserMutation.isPending ? 'Creating...' : 'Create User'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Add User — company + permission role selectors live here */}
+      <UserFormModal open={showDialog} onClose={() => setShowDialog(false)} />
     </>
   )
+}
+
+/*
+| Converts stored permissions back into the flat shape this form uses.
+|
+| The server stores action-level keys ({ "leads.view": true,
+| "leads.create": true }), but PermissionGroup registers one checkbox per
+| MODULE ({ leads: true }). Without this conversion the edit form loaded
+| every box unchecked, and saving then wiped the role's permissions.
+|
+| A module reads as ticked when any of its actions are granted.
+*/
+function toFlatPermissions(stored) {
+  const flat = {}
+  if (!stored || typeof stored !== 'object') return flat
+
+  for (const [key, value] of Object.entries(stored)) {
+    if (value === true) {
+      // "leads.view" -> leads ;  "leads" -> leads
+      flat[key.split('.')[0]] = true
+    }
+  }
+  return flat
 }
 
 function RolesTab() {
@@ -512,7 +473,18 @@ function RolesTab() {
   const roles = data?.roles || []
 
   const { register, handleSubmit, reset, watch, setValue } = useForm({
-    defaultValues: { name: '', description: '', permissions: {} },
+    defaultValues: {
+      name: '',
+      description: '',
+      permissions: {},
+      // A role belongs to exactly one company. The server used to take
+      // this from req.companyId, so a super admin working across
+      // companies had no way to say which tenant a new role was for.
+      companyId: '',
+      // Optional parent — a child role inherits everything its parent
+      // grants, resolved server-side in resolveRolePermissions().
+      parentRoleId: '',
+    },
   })
 
   const invalidate = () => {
@@ -586,13 +558,19 @@ function RolesTab() {
 
   const openCreateModal = () => {
     setEditingRole(null)
-    reset({ name: '', description: '', permissions: {} })
+    reset({ name: '', description: '', permissions: {}, companyId: '', parentRoleId: '' })
     setModalOpen(true)
   }
 
   const openEditModal = (role) => {
     setEditingRole(role)
-    reset({ name: role.name || '', description: role.description || '', permissions: role.permissions || {} })
+    reset({
+      name: role.name || '',
+      description: role.description || '',
+      permissions: toFlatPermissions(role.permissions),
+      companyId: role.companyId || '',
+      parentRoleId: role.parentRoleId || '',
+    })
     setModalOpen(true)
   }
 
@@ -773,6 +751,7 @@ function RolesTab() {
         watch={watch}
         setValue={setValue}
         mode={editingRole ? 'edit' : 'create'}
+        editingRoleId={editingRole?.id}
       />
 
       {viewingRole && <PermissionMatrixDrawer role={viewingRole} onClose={() => setViewingRole(null)} />}

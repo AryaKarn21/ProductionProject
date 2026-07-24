@@ -4,6 +4,10 @@ import { Attendance, Employee, Shift } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
 
 import { createNotification } from "../services/notification.service.js";
+import {
+  finalizeAbsencesForDate,
+  finalizeAbsencesForRange,
+} from "../services/attendanceFinalization.service.js";
 const router = express.Router();
 
 const getCompany = (req) => req.companyId || req.headers['x-company-id'] || req.headers['x-company-id'] || req.get('X-Company-ID');
@@ -310,6 +314,43 @@ router.patch("/:id", protect, async (req, res, next) => {
     });
 
     res.json(record);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// FINALIZE ABSENCES — marks employees "absent" for past working days with
+// no attendance/check-in record, no approved leave, no weekly-off, and no
+// company holiday. The daily cron job (scheduler.service.js) calls the same
+// underlying service automatically every night; this endpoint exists so an
+// admin can (a) backfill historical missing days, or (b) manually trigger
+// finalization for a specific date without waiting for the cron job.
+//
+// Body: { date: "YYYY-MM-DD" }  OR  { fromDate: "YYYY-MM-DD", toDate: "YYYY-MM-DD" }
+// ─────────────────────────────────────────────────────────────
+router.post("/finalize-absences", protect, async (req, res, next) => {
+  try {
+    const companyId = getCompany(req);
+    if (!companyId) {
+      return res.status(400).json({ message: "Company not found" });
+    }
+
+    const { date, fromDate, toDate } = req.body;
+
+    if (!date && !fromDate) {
+      return res.status(400).json({
+        message: "Provide either { date } or { fromDate, toDate }.",
+      });
+    }
+
+    const results = date
+      ? [await finalizeAbsencesForDate(companyId, date)]
+      : await finalizeAbsencesForRange(companyId, fromDate, toDate || fromDate);
+
+    const totalMarked = results.reduce((sum, r) => sum + (r.marked || 0), 0);
+
+    res.json({ totalMarked, results });
   } catch (err) {
     next(err);
   }

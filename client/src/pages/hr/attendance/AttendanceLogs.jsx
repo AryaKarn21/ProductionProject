@@ -17,10 +17,12 @@ import {
   Download,
   Upload,
   RotateCcw,
+  Building2,
 } from "lucide-react";
 import { attendanceAPI } from "@/api/attendance.api";
 import { employeesAPI } from "@/api/employees.api";
 import { shiftsAPI } from "@/api/shifts.api";
+import { useAuthStore } from "@/store/auth.store";
 import DataTable from "@/components/shared/DataTable";
 import FilterBar from "@/components/shared/FilterBar";
 import FormModal from "@/components/shared/FormModal";
@@ -68,15 +70,19 @@ export default function AttendanceLogs() {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  // ── Company name ──────────────────────────────────────────────────────────
+  const { user, activeCompany, companies } = useAuthStore();
+  const companyName =
+    (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
+    user?.companyName ||
+    "Your Company";
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["attendance", params],
     queryFn: () => attendanceAPI.getAll(params).then((r) => r.data),
     placeholderData: keepPreviousData,
   });
 
-  // Wide, unpaginated fetch (same filters, minus search/page) that powers
-  // the KPI dashboard cards so the counts reflect the full filtered range,
-  // not just the current page of 25.
   const statsFilters = {
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
@@ -101,7 +107,7 @@ export default function AttendanceLogs() {
   const employees = empData?.employees || [];
   const departments = useMemo(
     () => [...new Set(employees.map((e) => e.department).filter(Boolean))],
-    [employees],
+    [employees]
   );
 
   const { data: shiftData } = useQuery({
@@ -128,17 +134,8 @@ export default function AttendanceLogs() {
     },
   });
 
-  const {
-    register: regEdit,
-    handleSubmit: hEdit,
-    reset: resetEdit,
-  } = useForm();
-
-  const {
-    register: regCorrection,
-    handleSubmit: hCorrection,
-    reset: resetCorrection,
-  } = useForm();
+  const { register: regEdit, handleSubmit: hEdit, reset: resetEdit } = useForm();
+  const { register: regCorrection, handleSubmit: hCorrection, reset: resetCorrection } = useForm();
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["attendance"] });
@@ -160,12 +157,8 @@ export default function AttendanceLogs() {
   const checkOutMutation = useMutation({
     mutationFn: (id) => attendanceAPI.checkOut(id),
     onMutate: (id) => setPendingRowId(id),
-    onSuccess: () => {
-      invalidateAll();
-      toast.success("Checked out");
-    },
-    onError: (err) =>
-      toast.error(err?.response?.data?.message || "Failed to check out"),
+    onSuccess: () => { invalidateAll(); toast.success("Checked out"); },
+    onError: (err) => toast.error(err?.response?.data?.message || "Failed to check out"),
     onSettled: () => setPendingRowId(null),
   });
 
@@ -177,8 +170,7 @@ export default function AttendanceLogs() {
       setCorrectionModal(false);
       toast.success("Record updated");
     },
-    onError: (err) =>
-      toast.error(err?.response?.data?.message || "Failed to update"),
+    onError: (err) => toast.error(err?.response?.data?.message || "Failed to update"),
   });
 
   const approvalMutation = useMutation({
@@ -187,12 +179,9 @@ export default function AttendanceLogs() {
     onMutate: ({ id }) => setPendingRowId(id),
     onSuccess: (_res, { approvalStatus }) => {
       invalidateAll();
-      toast.success(
-        approvalStatus === "approved" ? "Record approved" : "Record rejected",
-      );
+      toast.success(approvalStatus === "approved" ? "Record approved" : "Record rejected");
     },
-    onError: (err) =>
-      toast.error(err?.response?.data?.message || "Failed to update status"),
+    onError: (err) => toast.error(err?.response?.data?.message || "Failed to update status"),
     onSettled: () => setPendingRowId(null),
   });
 
@@ -203,12 +192,8 @@ export default function AttendanceLogs() {
       approvalStatus: row.approvalStatus || "approved",
       shiftId: row.shift?.id || row.shiftId || "",
       breakMinutes: row.breakMinutes ?? "",
-      checkIn: row.checkIn
-        ? format(new Date(row.checkIn), "yyyy-MM-dd'T'HH:mm")
-        : "",
-      checkOut: row.checkOut
-        ? format(new Date(row.checkOut), "yyyy-MM-dd'T'HH:mm")
-        : "",
+      checkIn: row.checkIn ? format(new Date(row.checkIn), "yyyy-MM-dd'T'HH:mm") : "",
+      checkOut: row.checkOut ? format(new Date(row.checkOut), "yyyy-MM-dd'T'HH:mm") : "",
       notes: row.notes || "",
     });
     setEditModal(true);
@@ -217,49 +202,26 @@ export default function AttendanceLogs() {
   const openCorrection = (row) => {
     setCorrectionRecord(row);
     resetCorrection({
-      checkIn: row.checkIn
-        ? format(new Date(row.checkIn), "yyyy-MM-dd'T'HH:mm")
-        : "",
-      checkOut: row.checkOut
-        ? format(new Date(row.checkOut), "yyyy-MM-dd'T'HH:mm")
-        : "",
+      checkIn: row.checkIn ? format(new Date(row.checkIn), "yyyy-MM-dd'T'HH:mm") : "",
+      checkOut: row.checkOut ? format(new Date(row.checkOut), "yyyy-MM-dd'T'HH:mm") : "",
       reason: "",
     });
     setCorrectionModal(true);
   };
 
-  const handleFilterChange = (k, v) =>
-    setParams((p) => ({ ...p, [k]: v, page: 1 }));
-
+  const handleFilterChange = (k, v) => setParams((p) => ({ ...p, [k]: v, page: 1 }));
   const resetFilters = () => setParams(defaultParams(today));
 
-  // ── Export CSV (client-side — no new backend endpoint needed) ──────
   const handleExport = async () => {
     setExporting(true);
     try {
       const { search, page, limit, ...filters } = params;
-      const res = await attendanceAPI.getAll({
-        ...filters,
-        search,
-        limit: 5000,
-        page: 1,
-      });
+      const res = await attendanceAPI.getAll({ ...filters, search, limit: 5000, page: 1 });
       const rows = res.data?.attendance || [];
       const header = [
-        "Employee",
-        "Department",
-        "Shift",
-        "Date",
-        "Check In",
-        "Check Out",
-        "Working Hours",
-        "Break (min)",
-        "Overtime",
-        "Late",
-        "Early Exit",
-        "Status",
-        "Approval Status",
-        "Notes",
+        "Employee", "Department", "Shift", "Date",
+        "Check In", "Check Out", "Working Hours", "Break (min)",
+        "Overtime", "Late", "Early Exit", "Status", "Approval Status", "Notes",
       ];
       const csvRows = rows.map((r) => [
         r.employee ? `${r.employee.firstName} ${r.employee.lastName}` : "",
@@ -284,7 +246,7 @@ export default function AttendanceLogs() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `attendance-${Date.now()}.csv`;
+      a.download = `attendance-${companyName.replace(/\s+/g, "-")}-${Date.now()}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -297,7 +259,6 @@ export default function AttendanceLogs() {
     }
   };
 
-  // ── Import CSV (reuses the existing check-in endpoint per row) ─────
   const handleImportFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -305,30 +266,23 @@ export default function AttendanceLogs() {
     try {
       const text = await file.text();
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      const [, ...dataLines] = lines; // skip header row
-      let created = 0;
-      let failed = 0;
+      const [, ...dataLines] = lines;
+      let created = 0, failed = 0;
       for (const line of dataLines) {
         const [employeeId, date, status, checkIn, checkOut, notes] = line
           .split(",")
           .map((c) => c.replace(/^"|"$/g, "").trim());
-        if (!employeeId || !date) {
-          failed += 1;
-          continue;
-        }
+        if (!employeeId || !date) { failed++; continue; }
         try {
           await attendanceAPI.checkIn({
-            employeeId,
-            date,
+            employeeId, date,
             status: status || "present",
             notes,
             ...(checkIn ? { checkIn: new Date(`${date}T${checkIn}`) } : {}),
             ...(checkOut ? { checkOut: new Date(`${date}T${checkOut}`) } : {}),
           });
-          created += 1;
-        } catch {
-          failed += 1;
-        }
+          created++;
+        } catch { failed++; }
       }
       toast.success(`Imported: ${created} created, ${failed} failed`);
       invalidateAll();
@@ -343,64 +297,40 @@ export default function AttendanceLogs() {
   const renderActions = (row) => {
     const busy = pendingRowId === row.id;
     return (
-      <div
-        className="flex items-center justify-end gap-1 flex-wrap"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex items-center justify-end gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
         {!row.checkOut && (
           <button
             className="btn btn-ghost btn-sm flex items-center gap-1"
-            onClick={() => {
-              if (confirm("Mark check-out now?")) checkOutMutation.mutate(row.id);
-            }}
-            disabled={busy}
-            title="Check Out"
+            onClick={() => { if (confirm("Mark check-out now?")) checkOutMutation.mutate(row.id); }}
+            disabled={busy} title="Check Out"
           >
             <LogOut size={13} /> Out
           </button>
         )}
-        <button
-          className="btn btn-ghost btn-sm flex items-center gap-1"
-          onClick={() => setDetailsRecord(row)}
-          title="View Details"
-        >
+        <button className="btn btn-ghost btn-sm" onClick={() => setDetailsRecord(row)} title="View">
           <Eye size={13} />
         </button>
-        <button
-          className="btn btn-ghost btn-sm flex items-center gap-1"
-          onClick={() => openEdit(row)}
-          title="Edit"
-        >
+        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(row)} title="Edit">
           <Pencil size={13} />
         </button>
-        <button
-          className="btn btn-ghost btn-sm flex items-center gap-1"
-          onClick={() => openCorrection(row)}
-          title="Request Correction"
-        >
+        <button className="btn btn-ghost btn-sm" onClick={() => openCorrection(row)} title="Request Correction">
           <History size={13} />
         </button>
         {row.approvalStatus === "pending" && (
           <>
             <button
-              className="btn btn-ghost btn-sm flex items-center gap-1"
+              className="btn btn-ghost btn-sm"
               style={{ color: "var(--success)" }}
-              onClick={() =>
-                approvalMutation.mutate({ id: row.id, approvalStatus: "approved" })
-              }
-              disabled={busy}
-              title="Approve"
+              onClick={() => approvalMutation.mutate({ id: row.id, approvalStatus: "approved" })}
+              disabled={busy} title="Approve"
             >
               <Check size={13} />
             </button>
             <button
-              className="btn btn-ghost btn-sm flex items-center gap-1"
+              className="btn btn-ghost btn-sm"
               style={{ color: "var(--danger)" }}
-              onClick={() =>
-                approvalMutation.mutate({ id: row.id, approvalStatus: "rejected" })
-              }
-              disabled={busy}
-              title="Reject"
+              onClick={() => approvalMutation.mutate({ id: row.id, approvalStatus: "rejected" })}
+              disabled={busy} title="Reject"
             >
               <XIcon size={13} />
             </button>
@@ -412,112 +342,51 @@ export default function AttendanceLogs() {
 
   const columns = [
     {
-      key: "employee",
-      label: "Employee",
+      key: "employee", label: "Employee",
       render: (val) =>
         val ? (
           <div className="flex items-center gap-2 min-w-0">
-            <Avatar
-              src={val.avatar}
-              name={`${val.firstName} ${val.lastName}`}
-              size="sm"
-            />
+            <Avatar src={val.avatar} name={`${val.firstName} ${val.lastName}`} size="sm" />
             <div className="min-w-0">
-              <p
-                className="text-[13px] font-medium truncate"
-                style={{ color: "var(--text-primary)" }}
-              >
+              <p className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
                 {val.firstName} {val.lastName}
               </p>
-              <p
-                className="text-[11px] truncate"
-                style={{ color: "var(--text-muted)" }}
-              >
+              <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
                 {val.department || "—"}
               </p>
             </div>
           </div>
-        ) : (
-          "—"
-        ),
+        ) : "—",
     },
     {
-      key: "department",
-      label: "Department",
-      hideOnMobile: true,
+      key: "department", label: "Department", hideOnMobile: true,
       render: (_val, row) => row.employee?.department || "—",
     },
+    { key: "shift", label: "Shift", render: (val) => val?.name || <span style={{ color: "var(--text-muted)" }}>Default</span> },
+    { key: "date", label: "Date", sortable: true, render: (val) => formatDate(val) },
+    { key: "checkIn", label: "Check In", render: (val) => val ? format(new Date(val), "hh:mm a") : "—" },
     {
-      key: "shift",
-      label: "Shift",
-      render: (val) => val?.name || "Default",
+      key: "checkOut", label: "Check Out",
+      render: (val) => val ? format(new Date(val), "hh:mm a") : <span style={{ color: "var(--text-muted)" }}>Pending</span>,
     },
     {
-      key: "date",
-      label: "Date",
-      sortable: true,
-      render: (val) => formatDate(val),
+      key: "hoursWorked", label: "Working Hours",
+      render: (val) => val != null ? <span className="font-medium">{Number(val).toFixed(1)}h</span> : "—",
     },
+    { key: "breakMinutes", label: "Break", hideOnMobile: true, render: (val) => val != null ? formatMinutes(val) : "—" },
+    { key: "overtime", label: "Overtime", render: (_val, row) => formatMinutes(computeOvertimeMinutes(row)) },
+    { key: "late", label: "Late", hideOnMobile: true, render: (_val, row) => formatMinutes(computeLateMinutes(row)) },
+    { key: "earlyExit", label: "Early Exit", hideOnMobile: true, render: (_val, row) => formatMinutes(computeEarlyExitMinutes(row)) },
     {
-      key: "checkIn",
-      label: "Check In",
-      render: (val) => (val ? format(new Date(val), "hh:mm a") : "—"),
-    },
-    {
-      key: "checkOut",
-      label: "Check Out",
-      render: (val) =>
-        val ? (
-          format(new Date(val), "hh:mm a")
-        ) : (
-          <span style={{ color: "var(--text-muted)" }}>Pending</span>
-        ),
-    },
-    {
-      key: "hoursWorked",
-      label: "Working Hours",
-      render: (val) =>
-        val != null ? <span className="font-medium">{Number(val).toFixed(1)}h</span> : "—",
-    },
-    {
-      key: "breakMinutes",
-      label: "Break Hours",
-      hideOnMobile: true,
-      render: (val) => (val != null ? formatMinutes(val) : "—"),
-    },
-    {
-      key: "overtime",
-      label: "Overtime",
-      render: (_val, row) => formatMinutes(computeOvertimeMinutes(row)),
-    },
-    {
-      key: "late",
-      label: "Late Minutes",
-      hideOnMobile: true,
-      render: (_val, row) => formatMinutes(computeLateMinutes(row)),
-    },
-    {
-      key: "earlyExit",
-      label: "Early Exit",
-      hideOnMobile: true,
-      render: (_val, row) => formatMinutes(computeEarlyExitMinutes(row)),
-    },
-    {
-      key: "status",
-      label: "Attendance Status",
+      key: "status", label: "Status",
       render: (val = "present") => (
-        <Badge variant={classifyStatus(val)} dot>
-          {formatStatusLabel(val)}
-        </Badge>
+        <Badge variant={classifyStatus(val)} dot>{formatStatusLabel(val)}</Badge>
       ),
     },
     {
-      key: "approvalStatus",
-      label: "Approval Status",
+      key: "approvalStatus", label: "Approval",
       render: (val = "approved") => (
-        <Badge variant={APPROVAL_VARIANT[val] || "gray"}>
-          {formatStatusLabel(val)}
-        </Badge>
+        <Badge variant={APPROVAL_VARIANT[val] || "gray"}>{formatStatusLabel(val)}</Badge>
       ),
     },
   ];
@@ -526,51 +395,29 @@ export default function AttendanceLogs() {
     <div>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <Avatar
-            src={row.employee?.avatar}
-            name={
-              row.employee
-                ? `${row.employee.firstName} ${row.employee.lastName}`
-                : "—"
-            }
-            size="sm"
-          />
+          <Avatar src={row.employee?.avatar} name={row.employee ? `${row.employee.firstName} ${row.employee.lastName}` : "—"} size="sm" />
           <div className="min-w-0">
-            <p
-              className="text-[13px] font-medium truncate"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {row.employee
-                ? `${row.employee.firstName} ${row.employee.lastName}`
-                : "—"}
+            <p className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+              {row.employee ? `${row.employee.firstName} ${row.employee.lastName}` : "—"}
             </p>
             <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
               {row.employee?.department || "—"} · {row.shift?.name || "Default"}
             </p>
           </div>
         </div>
-        <Badge variant={classifyStatus(row.status)} dot>
-          {formatStatusLabel(row.status)}
-        </Badge>
+        <Badge variant={classifyStatus(row.status)} dot>{formatStatusLabel(row.status)}</Badge>
       </div>
-
-      <div
-        className="mt-3 grid grid-cols-2 gap-y-1.5 gap-x-2 text-[12px]"
-        style={{ color: "var(--text-secondary)" }}
-      >
+      <div className="mt-3 grid grid-cols-2 gap-y-1.5 text-[12px]" style={{ color: "var(--text-secondary)" }}>
         <span>In: {row.checkIn ? format(new Date(row.checkIn), "hh:mm a") : "—"}</span>
-        <span className="text-right">
-          Out: {row.checkOut ? format(new Date(row.checkOut), "hh:mm a") : "Pending"}
-        </span>
+        <span className="text-right">Out: {row.checkOut ? format(new Date(row.checkOut), "hh:mm a") : "Pending"}</span>
         <span>Hours: {row.hoursWorked != null ? `${Number(row.hoursWorked).toFixed(1)}h` : "—"}</span>
-        <span className="text-right">Overtime: {formatMinutes(computeOvertimeMinutes(row))}</span>
-        <span className="col-span-2 flex items-center gap-1">
+        <span className="text-right">OT: {formatMinutes(computeOvertimeMinutes(row))}</span>
+        <span className="col-span-2">
           <Badge variant={APPROVAL_VARIANT[row.approvalStatus] || "gray"} className="!py-0">
             {formatStatusLabel(row.approvalStatus || "approved")}
           </Badge>
         </span>
       </div>
-
       <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
         {renderActions(row)}
       </div>
@@ -579,38 +426,36 @@ export default function AttendanceLogs() {
 
   return (
     <div className="animate-fade-in">
+      {/* ── Header ── */}
       <div className="page-header">
         <div>
-          <h1
-            className="text-[18px] font-bold"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Attendance
-          </h1>
-          <p
-            className="text-[12px] mt-0.5"
-            style={{ color: "var(--text-muted)" }}
-          >
+          <div className="flex items-center gap-2 mb-0.5">
+            <h1 className="text-[18px] font-bold" style={{ color: "var(--text-primary)" }}>
+              Attendance
+            </h1>
+            {/* Company name badge */}
+            <span
+              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+              style={{ background: "var(--surface-2)", color: "var(--text-muted)" }}
+            >
+              <Building2 size={11} />
+              {companyName}
+            </span>
+          </div>
+          <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
             {data?.total ?? 0} records
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
           <button
             className="btn btn-secondary flex items-center justify-center gap-2 w-full sm:w-auto"
-            onClick={handleExport}
-            disabled={exporting}
+            onClick={handleExport} disabled={exporting}
           >
             <Download size={14} /> {exporting ? "Exporting..." : "Export"}
           </button>
           <label className="btn btn-secondary flex items-center justify-center gap-2 w-full sm:w-auto cursor-pointer">
             <Upload size={14} /> {importing ? "Importing..." : "Import"}
-            <input
-              type="file"
-              accept=".csv"
-              hidden
-              onChange={handleImportFile}
-              disabled={importing}
-            />
+            <input type="file" accept=".csv" hidden onChange={handleImportFile} disabled={importing} />
           </label>
           <button
             className="btn btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
@@ -628,21 +473,12 @@ export default function AttendanceLogs() {
           searchPlaceholder="Search employee..."
           filters={[
             { key: "status", label: "Status", options: ATTENDANCE_STATUS_OPTIONS },
+            { key: "department", label: "Department", options: departments.map((d) => ({ label: d, value: d })) },
             {
-              key: "department",
-              label: "Department",
-              options: departments.map((d) => ({ label: d, value: d })),
-            },
-            {
-              key: "shiftId",
-              label: "Shift",
+              key: "shiftId", label: "Shift",
               options: shifts.map((s) => ({ label: s.name, value: s.id })),
             },
-            {
-              key: "approvalStatus",
-              label: "Approval",
-              options: APPROVAL_STATUS_OPTIONS,
-            },
+            { key: "approvalStatus", label: "Approval", options: APPROVAL_STATUS_OPTIONS },
           ]}
           values={params}
           onChange={handleFilterChange}
@@ -655,8 +491,7 @@ export default function AttendanceLogs() {
           <div className="flex items-center gap-2 flex-1">
             <label className="form-label mb-0 whitespace-nowrap">From</label>
             <input
-              type="date"
-              className="input w-full xs:w-auto"
+              type="date" className="input w-full xs:w-auto"
               value={params.dateFrom}
               onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
             />
@@ -664,8 +499,7 @@ export default function AttendanceLogs() {
           <div className="flex items-center gap-2 flex-1">
             <label className="form-label mb-0 whitespace-nowrap">To</label>
             <input
-              type="date"
-              className="input w-full xs:w-auto"
+              type="date" className="input w-full xs:w-auto"
               value={params.dateTo}
               min={params.dateFrom || undefined}
               onChange={(e) => handleFilterChange("dateTo", e.target.value)}
@@ -699,41 +533,39 @@ export default function AttendanceLogs() {
         />
       </div>
 
-      {/* Log Attendance Modal */}
+      {/* ── Log Attendance Modal ── */}
       <FormModal
         open={checkInModal}
-        onClose={() => {
-          setCheckInModal(false);
-          resetCI();
-        }}
+        onClose={() => { setCheckInModal(false); resetCI(); }}
         title="Log Attendance"
         onSubmit={hCI((d) => {
-          const payload = {
+          checkInMutation.mutate({
             employeeId: d.employee,
             date: d.date,
             status: d.status,
             shiftId: d.shiftId || undefined,
             breakMinutes: d.breakMinutes ? Number(d.breakMinutes) : undefined,
             notes: d.notes,
-            ...(d.checkIn
-              ? { checkIn: new Date(`${d.date}T${d.checkIn}`) }
-              : {}),
-            ...(d.checkOut
-              ? { checkOut: new Date(`${d.date}T${d.checkOut}`) }
-              : {}),
-          };
-          checkInMutation.mutate(payload);
+            ...(d.checkIn ? { checkIn: new Date(`${d.date}T${d.checkIn}`) } : {}),
+            ...(d.checkOut ? { checkOut: new Date(`${d.date}T${d.checkOut}`) } : {}),
+          });
         })}
         loading={checkInMutation.isPending}
         submitLabel="Log Attendance"
       >
         <div className="flex flex-col gap-4">
+          {/* Company context */}
+          <div
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px]"
+            style={{ background: "var(--surface-2)", color: "var(--text-muted)" }}
+          >
+            <Building2 size={13} />
+            <span>Logging for <strong style={{ color: "var(--text-primary)" }}>{companyName}</strong></span>
+          </div>
+
           <div className="form-group">
             <label className="form-label">Employee *</label>
-            <select
-              className="input"
-              {...regCI("employee", { required: true })}
-            >
+            <select className="input" {...regCI("employee", { required: true })}>
               <option value="">Select employee</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -741,49 +573,47 @@ export default function AttendanceLogs() {
                 </option>
               ))}
             </select>
-            {errCI.employee && (
-              <p className="text-[11px] text-red-500">Employee is required</p>
-            )}
+            {errCI.employee && <p className="text-[11px] text-red-500">Employee is required</p>}
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="form-group">
               <label className="form-label">Date *</label>
-              <input
-                type="date"
-                className="input"
-                {...regCI("date", { required: true })}
-              />
+              <input type="date" className="input" {...regCI("date", { required: true })} />
             </div>
             <div className="form-group">
               <label className="form-label">Status *</label>
               <select className="input" {...regCI("status")}>
                 {ATTENDANCE_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
+
+            {/* ── Shift dropdown — shows shifts for this company ── */}
             <div className="form-group">
               <label className="form-label">Shift</label>
               <select className="input" {...regCI("shiftId")}>
-                <option value="">Select Shift</option>
-                {shifts.map((shift) => (
-                  <option key={shift.id} value={shift.id}>
-                    {shift.name}
+                <option value="">— Default / No Shift —</option>
+                {shifts.length === 0 && (
+                  <option disabled>No shifts found — add one in HR › Shifts</option>
+                )}
+                {shifts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.startTime?.slice(0, 5)} – {s.endTime?.slice(0, 5)})
                   </option>
                 ))}
               </select>
+              {shifts.length === 0 && (
+                <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+                  No shifts yet. <a href="/hr/shifts" className="underline" style={{ color: "var(--primary)" }}>Create one</a> first.
+                </p>
+              )}
             </div>
+
             <div className="form-group">
               <label className="form-label">Break (minutes)</label>
-              <input
-                type="number"
-                min="0"
-                className="input"
-                placeholder="0"
-                {...regCI("breakMinutes")}
-              />
+              <input type="number" min="0" className="input" placeholder="0" {...regCI("breakMinutes")} />
             </div>
             <div className="form-group">
               <label className="form-label">Check In Time</label>
@@ -796,17 +626,12 @@ export default function AttendanceLogs() {
           </div>
           <div className="form-group">
             <label className="form-label">Notes</label>
-            <textarea
-              className="input"
-              rows={2}
-              placeholder="Any additional notes..."
-              {...regCI("notes")}
-            />
+            <textarea className="input" rows={2} placeholder="Any additional notes..." {...regCI("notes")} />
           </div>
         </div>
       </FormModal>
 
-      {/* Edit Record Modal */}
+      {/* ── Edit Record Modal ── */}
       <FormModal
         open={editModal}
         onClose={() => setEditModal(false)}
@@ -815,7 +640,7 @@ export default function AttendanceLogs() {
           updateMutation.mutate({
             id: editRecord.id,
             data: { ...d, breakMinutes: d.breakMinutes ? Number(d.breakMinutes) : null },
-          }),
+          })
         )}
         loading={updateMutation.isPending}
         submitLabel="Save Changes"
@@ -826,9 +651,7 @@ export default function AttendanceLogs() {
               <label className="form-label">Attendance Status</label>
               <select className="input" {...regEdit("status")}>
                 {ATTENDANCE_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
@@ -836,47 +659,32 @@ export default function AttendanceLogs() {
               <label className="form-label">Approval Status</label>
               <select className="input" {...regEdit("approvalStatus")}>
                 {APPROVAL_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
             <div className="form-group">
               <label className="form-label">Shift</label>
               <select className="input" {...regEdit("shiftId")}>
-                <option value="">Select Shift</option>
-                {shifts.map((shift) => (
-                  <option key={shift.id} value={shift.id}>
-                    {shift.name}
+                <option value="">— Default / No Shift —</option>
+                {shifts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.startTime?.slice(0, 5)} – {s.endTime?.slice(0, 5)})
                   </option>
                 ))}
               </select>
             </div>
             <div className="form-group">
               <label className="form-label">Break (minutes)</label>
-              <input
-                type="number"
-                min="0"
-                className="input"
-                {...regEdit("breakMinutes")}
-              />
+              <input type="number" min="0" className="input" {...regEdit("breakMinutes")} />
             </div>
             <div className="form-group">
               <label className="form-label">Check In</label>
-              <input
-                type="datetime-local"
-                className="input"
-                {...regEdit("checkIn")}
-              />
+              <input type="datetime-local" className="input" {...regEdit("checkIn")} />
             </div>
             <div className="form-group">
               <label className="form-label">Check Out</label>
-              <input
-                type="datetime-local"
-                className="input"
-                {...regEdit("checkOut")}
-              />
+              <input type="datetime-local" className="input" {...regEdit("checkOut")} />
             </div>
           </div>
           <div className="form-group">
@@ -886,84 +694,48 @@ export default function AttendanceLogs() {
         </div>
       </FormModal>
 
-      {/* Attendance Details Modal (read-only) */}
-      <Modal
-        open={!!detailsRecord}
-        onClose={() => setDetailsRecord(null)}
-        title="Attendance Details"
-        size="md"
-      >
+      {/* ── Details Modal ── */}
+      <Modal open={!!detailsRecord} onClose={() => setDetailsRecord(null)} title="Attendance Details" size="md">
         {detailsRecord && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               <Avatar
                 src={detailsRecord.employee?.avatar}
-                name={
-                  detailsRecord.employee
-                    ? `${detailsRecord.employee.firstName} ${detailsRecord.employee.lastName}`
-                    : "—"
-                }
+                name={detailsRecord.employee ? `${detailsRecord.employee.firstName} ${detailsRecord.employee.lastName}` : "—"}
                 size="md"
               />
               <div>
                 <p className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                  {detailsRecord.employee
-                    ? `${detailsRecord.employee.firstName} ${detailsRecord.employee.lastName}`
-                    : "—"}
+                  {detailsRecord.employee ? `${detailsRecord.employee.firstName} ${detailsRecord.employee.lastName}` : "—"}
                 </p>
                 <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
                   {detailsRecord.employee?.department || "—"} · {detailsRecord.shift?.name || "Default"}
                 </p>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-[13px]">
               <DetailField label="Date" value={formatDate(detailsRecord.date)} />
-              <DetailField
-                label="Attendance Status"
-                value={<Badge variant={classifyStatus(detailsRecord.status)} dot>{formatStatusLabel(detailsRecord.status)}</Badge>}
-              />
-              <DetailField
-                label="Check In"
-                value={detailsRecord.checkIn ? format(new Date(detailsRecord.checkIn), "hh:mm a") : "—"}
-              />
-              <DetailField
-                label="Check Out"
-                value={detailsRecord.checkOut ? format(new Date(detailsRecord.checkOut), "hh:mm a") : "Pending"}
-              />
-              <DetailField
-                label="Working Hours"
-                value={detailsRecord.hoursWorked != null ? `${Number(detailsRecord.hoursWorked).toFixed(1)}h` : "—"}
-              />
+              <DetailField label="Status" value={<Badge variant={classifyStatus(detailsRecord.status)} dot>{formatStatusLabel(detailsRecord.status)}</Badge>} />
+              <DetailField label="Check In" value={detailsRecord.checkIn ? format(new Date(detailsRecord.checkIn), "hh:mm a") : "—"} />
+              <DetailField label="Check Out" value={detailsRecord.checkOut ? format(new Date(detailsRecord.checkOut), "hh:mm a") : "Pending"} />
+              <DetailField label="Working Hours" value={detailsRecord.hoursWorked != null ? `${Number(detailsRecord.hoursWorked).toFixed(1)}h` : "—"} />
               <DetailField label="Break" value={formatMinutes(detailsRecord.breakMinutes)} />
               <DetailField label="Overtime" value={formatMinutes(computeOvertimeMinutes(detailsRecord))} />
               <DetailField label="Late" value={formatMinutes(computeLateMinutes(detailsRecord))} />
               <DetailField label="Early Exit" value={formatMinutes(computeEarlyExitMinutes(detailsRecord))} />
-              <DetailField
-                label="Approval Status"
-                value={
-                  <Badge variant={APPROVAL_VARIANT[detailsRecord.approvalStatus] || "gray"}>
-                    {formatStatusLabel(detailsRecord.approvalStatus || "approved")}
-                  </Badge>
-                }
-              />
+              <DetailField label="Approval" value={<Badge variant={APPROVAL_VARIANT[detailsRecord.approvalStatus] || "gray"}>{formatStatusLabel(detailsRecord.approvalStatus || "approved")}</Badge>} />
             </div>
-
             {detailsRecord.notes && (
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>
-                  Notes
-                </p>
-                <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                  {detailsRecord.notes}
-                </p>
+                <p className="text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>Notes</p>
+                <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>{detailsRecord.notes}</p>
               </div>
             )}
           </div>
         )}
       </Modal>
 
-      {/* Attendance Correction Modal */}
+      {/* ── Correction Modal ── */}
       <FormModal
         open={correctionModal}
         onClose={() => setCorrectionModal(false)}
@@ -977,39 +749,29 @@ export default function AttendanceLogs() {
               approvalStatus: "pending",
               notes: `Correction requested: ${d.reason}`,
             },
-          }),
+          })
         )}
         loading={updateMutation.isPending}
         submitLabel="Submit Correction"
       >
         <div className="flex flex-col gap-4">
           <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-            Submitting a correction sets this record's approval status back to
-            <strong> Pending</strong> for manager review.
+            Submitting a correction sets this record's approval status back to <strong>Pending</strong> for manager review.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="form-group">
               <label className="form-label">Corrected Check In</label>
-              <input
-                type="datetime-local"
-                className="input"
-                {...regCorrection("checkIn")}
-              />
+              <input type="datetime-local" className="input" {...regCorrection("checkIn")} />
             </div>
             <div className="form-group">
               <label className="form-label">Corrected Check Out</label>
-              <input
-                type="datetime-local"
-                className="input"
-                {...regCorrection("checkOut")}
-              />
+              <input type="datetime-local" className="input" {...regCorrection("checkOut")} />
             </div>
           </div>
           <div className="form-group">
             <label className="form-label">Reason *</label>
             <textarea
-              className="input"
-              rows={3}
+              className="input" rows={3}
               placeholder="Explain why this record needs correction..."
               {...regCorrection("reason", { required: true })}
             />
@@ -1023,10 +785,7 @@ export default function AttendanceLogs() {
 function DetailField({ label, value }) {
   return (
     <div>
-      <p
-        className="text-[10px] font-medium uppercase tracking-wide mb-0.5"
-        style={{ color: "var(--text-muted)" }}
-      >
+      <p className="text-[10px] font-medium uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>
         {label}
       </p>
       <div style={{ color: "var(--text-primary)" }}>{value}</div>

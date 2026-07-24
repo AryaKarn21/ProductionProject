@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast'
 import { router } from './routes'
 import { useUIStore } from '@/store/ui.store'
 import { useEffect } from 'react'
+import AuthBootstrap from '@/components/shared/AuthBootstrap'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,7 +26,26 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {/*
+        AuthBootstrap calls GET /auth/me on mount and whenever the tab
+        regains focus, then writes the fresh permission list into the
+        auth store.
+
+        Without it, user.permissions was a snapshot frozen at login.
+        The server applied a role change on the very next request, but
+        the UI did not until the user signed out and back in — so a menu
+        item would still be visible and then 403 when clicked, or a newly
+        granted module would stay hidden.
+
+        It must WRAP RouterProvider, not just be imported. PermissionGuard
+        reads isBootstrapping from the store and shows a spinner while
+        this request is in flight, so nobody gets bounced to
+        /unauthorized on a stale permission list.
+      */}
+      <AuthBootstrap>
+        <RouterProvider router={router} />
+      </AuthBootstrap>
+
       <Toaster
         position="top-right"
         toastOptions={{

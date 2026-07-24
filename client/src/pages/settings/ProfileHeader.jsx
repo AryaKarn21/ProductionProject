@@ -83,19 +83,48 @@ export default function ProfileHeader({ user }) {
 
   return (
     <>
-      <Card>
-        <CardContent className="p-4 sm:p-6">
-          <div className="flex flex-col items-center text-center">
+      <Card className="overflow-hidden">
+        {/* Cover banner — layered gradient with a soft highlight so it
+            reads as a designed hero, not a flat color bar. */}
+        <div
+          className="relative h-24 sm:h-28 w-full overflow-hidden"
+          style={{
+            background:
+              "linear-gradient(135deg, var(--primary) 0%, var(--primary-hover, var(--primary)) 100%)",
+          }}
+        >
+          <div
+            className="absolute -top-10 -right-10 w-40 h-40 rounded-full"
+            style={{ background: "rgba(255,255,255,0.14)" }}
+          />
+          <div
+            className="absolute -bottom-16 -left-10 w-48 h-48 rounded-full"
+            style={{ background: "rgba(255,255,255,0.08)" }}
+          />
+        </div>
+
+        {/* Glass hero panel — floats over the banner/body boundary.
+            color-mix() blends with the theme's own surface/border vars so
+            it stays correctly tinted in both dark and light mode instead
+            of a hardcoded white-glass look. */}
+        <div className="px-4 sm:px-6">
+          <div
+            className="relative z-10 -mt-12 sm:-mt-14 rounded-2xl border px-4 sm:px-6 pt-4 sm:pt-5 pb-5 sm:pb-6 flex flex-col items-center text-center"
+            style={{
+              background: "color-mix(in srgb, var(--surface) 72%, transparent)",
+              borderColor: "color-mix(in srgb, var(--border) 70%, transparent)",
+              backdropFilter: "blur(16px)",
+              WebkitBackdropFilter: "blur(16px)",
+              boxShadow: "var(--shadow)",
+            }}
+          >
             <div className="relative">
               <Avatar
                 name={user?.name}
-                src={
-                  user?.avatar
-                    ? `${import.meta.env.VITE_API_URL}${user.avatar}`
-                    : undefined
-                }
+                src={user?.avatar || undefined}
                 size="xl"
-                className="border-4 border-white shadow-lg"
+                className="ring-4 shadow-lg"
+                style={{ boxShadow: "var(--shadow)", outline: "4px solid var(--surface)" }}
               />
 
               <button
@@ -108,7 +137,7 @@ export default function ProfileHeader({ user }) {
                 {uploadMutation.isPending ? (
                   <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <Camera size={16} />
+                  <Camera size={16} className="text-white" />
                 )}
               </button>
 
@@ -121,8 +150,11 @@ export default function ProfileHeader({ user }) {
               />
             </div>
 
+            {/* Name sits directly under the avatar with fixed, predictable
+                spacing (mt-4) so it never drifts relative to the glass
+                panel regardless of content length. */}
             <h2
-              className="text-xl sm:text-2xl font-bold mt-5 max-w-full break-words text-center"
+              className="text-xl sm:text-2xl font-bold mt-4 max-w-full break-words text-center"
               style={{ color: "var(--text-primary)" }}
             >
               {user?.name}
@@ -152,46 +184,51 @@ export default function ProfileHeader({ user }) {
                 {resendMutation.isPending ? "Sending…" : "Resend verification email"}
               </button>
             )}
+          </div>
+        </div>
 
-            <div className="w-full mt-6 space-y-4">
-              <div className="flex items-center gap-3 min-w-0" style={{ color: "var(--text-secondary)" }}>
-                <Mail size={18} className="shrink-0" />
-                <span className="truncate">{user?.email}</span>
-              </div>
-
-              <div className="flex items-center gap-3 min-w-0" style={{ color: "var(--text-secondary)" }}>
-                <Building2 size={18} className="shrink-0" />
-                <span className="truncate">
-                  {user?.company?.name || user?.companyName || "No Company"}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 min-w-0" style={{ color: "var(--text-secondary)" }}>
-                <Shield size={18} className="shrink-0" />
-                <span className="truncate">{user?.role}</span>
-              </div>
+        <CardContent className="p-4 sm:p-6 pt-5 sm:pt-6">
+          <div className="w-full grid grid-cols-2 gap-x-4 gap-y-4 text-left">
+            <div
+              className="col-span-2 flex items-center gap-3 min-w-0"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <Mail size={18} className="shrink-0" />
+              <span className="truncate">{user?.email}</span>
             </div>
 
-            <div className="flex gap-3 mt-6 w-full">
-              <Button
-                variant="outline"
-                className="flex-1"
-                loading={uploadMutation.isPending}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Change Photo
-              </Button>
-
-              <Button
-                variant="destructive"
-                size="icon"
-                disabled={removeMutation.isPending || !user?.avatar}
-                onClick={() => setConfirmRemoveOpen(true)}
-                aria-label="Remove profile photo"
-              >
-                <Trash2 size={16} />
-              </Button>
+            <div className="flex items-center gap-3 min-w-0" style={{ color: "var(--text-secondary)" }}>
+              <Building2 size={18} className="shrink-0" />
+              <span className="truncate">
+                {user?.company?.name || user?.companyName || "No Company"}
+              </span>
             </div>
+
+            <div className="flex items-center gap-3 min-w-0" style={{ color: "var(--text-secondary)" }}>
+              <Shield size={18} className="shrink-0" />
+              <span className="truncate">{user?.role}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-6 w-full">
+            <Button
+              variant="outline"
+              className="flex-1"
+              loading={uploadMutation.isPending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Change Photo
+            </Button>
+
+            <Button
+              variant="destructive"
+              size="icon"
+              disabled={removeMutation.isPending || !user?.avatar}
+              onClick={() => setConfirmRemoveOpen(true)}
+              aria-label="Remove profile photo"
+            >
+              <Trash2 size={16} />
+            </Button>
           </div>
         </CardContent>
       </Card>

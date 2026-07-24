@@ -2,9 +2,12 @@ import "./env.js"; // MUST be the first import — loads .env before anything el
 
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { sequelize } from "./config/db.js";
 import "./models/index.js"; // registers all associations before sync/queries run
 import path from "path";
+import fs from "fs";
 
 import authRoutes from "./routes/auth.routes.js";
 import leadsRoutes from "./routes/leads.routes.js";
@@ -17,6 +20,7 @@ import performanceRoutes from "./routes/performance.routes.js";
 import attendanceRoutes from "./routes/attendance.routes.js";
 import shiftRoutes from "./routes/shifts.routes.js";
 import leavesRoutes from "./routes/leaves.routes.js";
+import holidayRoutes from "./routes/holiday.routes.js";
 import payrollRoutes from "./routes/payroll.routes.js";
 import financeRoutes from "./routes/finance.routes.js";
 import inventoryRoutes from "./routes/inventory.routes.js";
@@ -27,7 +31,7 @@ import reportsRoutes from "./routes/reports.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import rolesRoutes from "./routes/roles.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
-import { errorHandler } from "./middleware/errorHandler.js";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
 import { resolveCompany } from "./middleware/tenant.js";
 import meetingsRoutes from "./routes/meetings.routes.js";
@@ -39,9 +43,179 @@ import { startScheduler } from "./services/scheduler.service.js";
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+/*
+|--------------------------------------------------------------------------
+| Startup configuration check
+|--------------------------------------------------------------------------
+| Fail loudly at boot rather than as a confusing 500 on the first login.
+*/
+const REQUIRED_ENV = ["JWT_SECRET", "DB_NAME", "DB_USER", "DB_HOST"];
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missing.length) {
+  console.error(`FATAL: missing required environment variables: ${missing.join(", ")}`);
+  process.exit(1);
+}
+if (process.env.JWT_SECRET.length < 32) {
+  console.error(
+    "FATAL: JWT_SECRET is too short. Generate one with:\n" +
+    '  node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"'
+  );
+  process.exit(1);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Proxy trust
+|--------------------------------------------------------------------------
+| Required for req.ip to be correct — and therefore for the IP address in
+| the audit log to be trustworthy. Set TRUST_PROXY in .env to the number
+| of proxies in front of the app (1 for a single nginx / load balancer).
+| Leave unset when the app is directly exposed.
+*/
+app.set("trust proxy", Number(process.env.TRUST_PROXY || 0));
+app.disable("x-powered-by");
+
+/*
+|--------------------------------------------------------------------------
+| Security headers
+|--------------------------------------------------------------------------
+*/
+app.use(
+  helmet({
+    // The API and the Vite dev server are on different origins, so
+    // cross-origin resource policy has to allow it.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false, // the SPA is served separately by Vite/nginx
+  })
+);
+
+/*
+|--------------------------------------------------------------------------
+| CORS
+|--------------------------------------------------------------------------
+| Was `app.use(cors())` — every origin on the internet was allowed to
+| call this API. Now restricted to an explicit allowlist from .env:
+|   CORS_ORIGINS=http://localhost:5173,https://crm.osgroup.com
+*/
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5174")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // No origin = same-origin request, curl, or a mobile app.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "X-Company-ID"],
+    exposedHeaders: ["Content-Disposition"],
+  })
+);
+
+/*
+|--------------------------------------------------------------------------
+| Body parsing — with a size limit
+|--------------------------------------------------------------------------
+| express.json() defaults to 100kb in Express 5, but being explicit
+| documents the intent and keeps it stable across upgrades.
+*/
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+/*
+|--------------------------------------------------------------------------
+| Rate limiting
+|--------------------------------------------------------------------------
+*/
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // only failed attempts count towards the limit
+  message: { message: "Too many attempts. Please try again in 15 minutes." },
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many verification requests. Please try again later." },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please slow down." },
+});
+
+// Strictest limits on the endpoints an attacker hammers first.
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/reset-password", authLimiter);
+app.use("/api/auth/send-otp", otpLimiter);
+app.use("/api/auth/verify-otp", otpLimiter);
+app.use("/api", apiLimiter);
+
+/*
+|--------------------------------------------------------------------------
+| Uploaded files — authenticated only
+|--------------------------------------------------------------------------
+| Was `app.use("/uploads", express.static(...))` with no auth at all, so
+| expense receipts, employee documents and email attachments were
+| downloadable by anyone who guessed a filename.
+|
+| `protect` now runs first. A per-file ownership check belongs in the
+| individual download routes (finance already has one); this closes the
+| open directory.
+*/
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const avatarsDir = path.join(uploadsDir, "avatars");
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+
+// Profile pictures are low-sensitivity and are rendered as plain <img src>
+// tags all over the app (profile header, employee list, attendance logs,
+// leave requests) — an <img> tag cannot attach the Bearer token the rest
+// of /uploads requires, and the attachment disposition below would force
+// a download dialog instead of displaying the image. So this narrow path
+// is public and inline; everything else under /uploads stays protected.
+app.use(
+  "/uploads/avatars",
+  express.static(avatarsDir, {
+    dotfiles: "deny",
+    index: false,
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", "inline");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    },
+  })
+);
+
+app.use(
+  "/uploads",
+  protect,
+  express.static(uploadsDir, {
+    dotfiles: "deny",
+    index: false,
+    setHeaders: (res) => {
+      // Stops an uploaded .html or .svg from executing in the user's
+      // session if it is opened directly.
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", "attachment");
+    },
+  })
+);
 
 app.use("/api/auth", authRoutes);
 
@@ -59,6 +233,12 @@ app.use("/api/users", protect, resolveCompany, usersRoutes);
 app.use("/api/attendance", protect, resolveCompany, attendanceRoutes);
 app.use("/api/shifts", protect, resolveCompany, shiftRoutes);
 app.use("/api/leaves", protect, resolveCompany, leavesRoutes);
+app.use(
+  "/api/holidays",
+  protect,
+  resolveCompany,
+  holidayRoutes
+);
 app.use("/api/payroll", protect, resolveCompany, payrollRoutes);
 app.use("/api/finance", protect, resolveCompany, financeRoutes);
 app.use("/api/inventory", protect, resolveCompany, inventoryRoutes);
@@ -67,12 +247,18 @@ app.use("/api/projects", protect, resolveCompany, projectsRoutes);
 app.use("/api/support", protect, resolveCompany, supportRoutes);
 app.use("/api/reports", protect, resolveCompany, reportsRoutes);
 app.use("/api/notifications", protect, resolveCompany, notificationsRoutes);
-app.use("/api/settings", protect, settingsRoutes);
+
+// SECURITY: resolveCompany was missing here, which is why every user
+// endpoint under /api/settings ran with no tenant scope at all.
+app.use("/api/settings", protect, resolveCompany, settingsRoutes);
+
 app.use("/api/roles", protect, resolveCompany, rolesRoutes);
 app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
 app.use("/api/email", protect, resolveCompany, emailRoutes);
+
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
+app.use("/api", notFoundHandler);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
@@ -82,20 +268,31 @@ async function start() {
     await sequelize.authenticate();
     console.log("MySQL connected");
 
-    // sync() creates tables that don't exist yet based on the model
-    // definitions. This replaces Mongoose's schema-less auto-creation.
-    // alter:true updates existing tables to match models in dev; remove
-    // alter (or use proper migrations) once the schema stabilizes.
+    // ────────────────────────────────────────────────────────────────
+    // IMPORTANT — READ BEFORE FIRST RUN
     //
-    // TEMPORARILY ENABLED: Role and AuditLog models just gained new
-    // columns (isActive/isDeleted/deletedAt on Role; module/device/
-    // browser/status on AuditLog). Those tables already exist in the DB
-    // from before, and bare sync() never adds columns to existing
-    // tables — only alter:true actually runs the ALTER TABLE statements
-    // needed to bring the real schema in line with the model. Once this
-    // has run successfully once, switch back to plain sequelize.sync().
-    await sequelize.sync();
-    console.log("Database synced");
+    // This release adds columns to several tables:
+    //   audit_logs   : module, device, browser, status, userAgent, sessionId
+    //   users        : status, tokenVersion, passwordChangedAt,
+    //                  failedLoginAttempts, lockedUntil, mfaEnabled, mfaSecret
+    //   roles        : parentRoleId, level, isSystem, createdById, updatedById
+    //   user_companies: id, roleId, isPrimary, isActive, joinedAt,
+    //                  assignedById, createdAt, updatedAt
+    //   shifts       : weeklyOffDays (NEW — automatic Absent finalization fix)
+    //   payslips     : unpaidAbsentDays, absentDeduction (NEW — same fix)
+    // and adds a new table:
+    //   holidays     : companyId, date, name, isActive (NEW — same fix)
+    //
+    // A bare sequelize.sync() never adds columns to tables that already
+    // exist. Run the app ONCE with alter enabled to apply them:
+    //
+    //   DB_SYNC_ALTER=true npm run dev
+    //
+    // then start it normally again. Take a database backup first.
+    // ────────────────────────────────────────────────────────────────
+    const alter = process.env.DB_SYNC_ALTER === "true";
+    await sequelize.sync({ alter });
+    console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
