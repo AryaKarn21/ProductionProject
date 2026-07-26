@@ -1,5 +1,5 @@
 import { getFileUrl } from "@/lib/utils";
-import { Search, Sun, Moon, clock, Command } from "lucide-react";
+import { Search, Sun, Moon, Clock, Command } from "lucide-react";
 import { useUIStore } from "@/store/ui.store";
 import { useAuthStore } from "@/store/auth.store";
 import { useQueryClient } from "@tanstack/react-query";
