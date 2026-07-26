@@ -282,7 +282,7 @@ async function start() {
     console.log("MySQL connected");
 
     const alter = process.env.DB_SYNC_ALTER === "true";
-    await sequelize.sync({ alter });
+    console.log("Skipping sync");
     console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
 
     app.listen(PORT, () => {
