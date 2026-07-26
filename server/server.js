@@ -278,9 +278,9 @@ async function start() {
     console.log("DB_NAME:", process.env.DB_NAME);
     console.log("DB_USER:", process.env.DB_USER);
      
-     //await sequelize.authenticate();
+    await sequelize.authenticate();
     console.log("MySQL connected");
-    
+
     const alter = process.env.DB_SYNC_ALTER === "true";
     await sequelize.sync({ alter });
     console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
