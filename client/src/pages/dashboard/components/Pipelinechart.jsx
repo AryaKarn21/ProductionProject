@@ -55,7 +55,7 @@ export default function PipelineChart({ data = [], loading }) {
           <div className="dash-skeleton w-full" style={{ height: 220 }} />
         ) : chartData.length ? (
           <div style={{ width: '100%', height: plotHeight }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" debounce={100}>
               <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 40, left: 4, bottom: 4 }} barCategoryGap="28%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />

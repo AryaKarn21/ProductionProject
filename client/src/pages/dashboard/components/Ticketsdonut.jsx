@@ -42,7 +42,7 @@ export default function TicketsDonut({ data = [], loading }) {
       ) : (
         <>
           <div style={{ height: 160 }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" debounce={100}>
               <PieChart>
                 <Pie
                   data={data}

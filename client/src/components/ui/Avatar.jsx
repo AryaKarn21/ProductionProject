@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cn, getInitials } from "@/lib/utils";
+import { cn, getInitials, getFileUrl } from "@/lib/utils";
 
 // Size classes for the avatar circle
 const sizeMap = {
@@ -13,7 +13,8 @@ const sizeMap = {
 export default function Avatar({ src, name = "", size = "md", className }) {
   const [imgError, setImgError] = useState(false);
   const dimensions = sizeMap[size] || sizeMap.md;
-  const showImage = src && !imgError;
+  const resolvedSrc = getFileUrl(src);
+  const showImage = resolvedSrc && !imgError;
 
   return (
     <div
@@ -30,7 +31,7 @@ export default function Avatar({ src, name = "", size = "md", className }) {
     >
       {showImage ? (
         <img
-          src={src}
+          src={resolvedSrc}
           alt={name || "avatar"}
           className="w-full h-full object-cover"
           onError={() => setImgError(true)}
