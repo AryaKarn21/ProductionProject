@@ -272,31 +272,15 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
-    //await sequelize.authenticate();
+   
+    console.log("DB_HOST:", process.env.DB_HOST);
+    console.log("DB_PORT:", process.env.DB_PORT);
+    console.log("DB_NAME:", process.env.DB_NAME);
+    console.log("DB_USER:", process.env.DB_USER);
+     
+     //await sequelize.authenticate();
     console.log("MySQL connected");
-
-    // ────────────────────────────────────────────────────────────────
-    // IMPORTANT — READ BEFORE FIRST RUN
-    //
-    // This release adds columns to several tables:
-    //   audit_logs   : module, device, browser, status, userAgent, sessionId
-    //   users        : status, tokenVersion, passwordChangedAt,
-    //                  failedLoginAttempts, lockedUntil, mfaEnabled, mfaSecret
-    //   roles        : parentRoleId, level, isSystem, createdById, updatedById
-    //   user_companies: id, roleId, isPrimary, isActive, joinedAt,
-    //                  assignedById, createdAt, updatedAt
-    //   shifts       : weeklyOffDays (NEW — automatic Absent finalization fix)
-    //   payslips     : unpaidAbsentDays, absentDeduction (NEW — same fix)
-    // and adds a new table:
-    //   holidays     : companyId, date, name, isActive (NEW — same fix)
-    //
-    // A bare sequelize.sync() never adds columns to tables that already
-    // exist. Run the app ONCE with alter enabled to apply them:
-    //
-    //   DB_SYNC_ALTER=true npm run dev
-    //
-    // then start it normally again. Take a database backup first.
-    // ────────────────────────────────────────────────────────────────
+    
     const alter = process.env.DB_SYNC_ALTER === "true";
     await sequelize.sync({ alter });
     console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
