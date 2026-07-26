@@ -255,7 +255,6 @@ app.use("/api/settings", protect, resolveCompany, settingsRoutes);
 
 app.use("/api/roles", protect, resolveCompany, rolesRoutes);
 app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
-app.use("/api/email", protect, resolveCompany, emailRoutes);
 
 // Google OAuth for Gmail. Mounted BEFORE the protected email router: it
 // applies `protect` per-route so the /google/callback redirect from Google
@@ -263,9 +262,9 @@ app.use("/api/email", protect, resolveCompany, emailRoutes);
 // the signed `state` instead. All other /api/email/* paths fall through to
 // the protected emailRoutes below.
 app.use("/api/email", googleAuthRoutes);
-//app.use("/api/email", protect, resolveCompany, emailRoutes);
-app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+app.use("/api/email", protect, resolveCompany, emailRoutes);
 
+app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api", notFoundHandler);
 app.use(errorHandler);
 
