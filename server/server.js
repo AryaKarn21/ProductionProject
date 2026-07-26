@@ -272,12 +272,22 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
-   
+    // TEMPORARY — remove this block after confirming DB connectivity
+    // with Hostinger. It just prints the app's real outbound IP so we
+    // can give Hostinger the exact address to check/whitelist.
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipData = await ipRes.json();
+      console.log("OUTBOUND IP (give this to Hostinger):", ipData.ip);
+    } catch (ipErr) {
+      console.log("Could not determine outbound IP:", ipErr.message);
+    }
+
     console.log("DB_HOST:", process.env.DB_HOST);
     console.log("DB_PORT:", process.env.DB_PORT);
     console.log("DB_NAME:", process.env.DB_NAME);
     console.log("DB_USER:", process.env.DB_USER);
-     
+
     await sequelize.authenticate();
     console.log("MySQL connected");
 
