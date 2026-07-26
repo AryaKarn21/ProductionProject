@@ -14,7 +14,11 @@ EmailAccount.init(
     authType:        { type: DataTypes.ENUM("oauth2", "password"), defaultValue: "password" },
     email:           { type: DataTypes.STRING, allowNull: false },
     displayName:     { type: DataTypes.STRING },
-    // Credentials are AES-256-GCM encrypted before being stored (see utils/crypto.js)
+    // Google's stable user id ("sub"), set when the mailbox is connected via
+    // Google OAuth. Null for legacy SMTP/app-password accounts.
+    googleId:        { type: DataTypes.STRING, allowNull: true },
+    // Credentials are AES-256-GCM encrypted before being stored (see utils/crypto.js).
+    // For OAuth2 accounts encRefreshToken is the long-lived secret; encPassword is unused.
     encAccessToken:  { type: DataTypes.TEXT },
     encRefreshToken: { type: DataTypes.TEXT },
     encPassword:     { type: DataTypes.TEXT },

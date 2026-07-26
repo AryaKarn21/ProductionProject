@@ -25,6 +25,30 @@ import { normalizePermissions, checkPermission } from '@/lib/permissions'
 | Set) and rehydrated into a Set on read.
 */
 
+/*
+| Derives the flat "module.action" permission array to keep in state.
+|
+| The server's buildAuthPayload() already sends `user.permissions` as a
+| FULLY RESOLVED array (role hierarchy + dependencies applied, unknown
+| keys stripped, in the exact vocabulary the API enforces). We must use
+| that array as-is.
+|
+| The bug this replaces: the store passed that array straight into
+| normalizePermissions(), whose job is to parse the RAW role object
+| ({ "leads.view": true } or legacy { leads: true }). That function
+| explicitly rejects arrays and returns an empty Set — so every
+| non-super-admin ended up with ZERO permissions in the store, their
+| whole sidebar hidden and every guarded route bouncing to /unauthorized,
+| even though the server had granted them correctly.
+|
+| The normalizePermissions() fallback is kept for any payload that still
+| arrives in the raw-object shape (e.g. an older cached login).
+*/
+const derivePermissions = (user) => {
+  if (Array.isArray(user?.permissions)) return user.permissions
+  return [...normalizePermissions(user?.permissions ?? user?.roleInfo?.permissions)]
+}
+
 export const useAuthStore = create(
   persist(
     (set, get) => ({
@@ -36,15 +60,11 @@ export const useAuthStore = create(
       isBootstrapping: true,
 
       setAuth: ({ user, token, companies }) => {
-        const permissionSet = normalizePermissions(
-          user?.permissions ?? user?.roleInfo?.permissions
-        )
-
         set({
           user,
           token,
           companies: companies || [],
-          permissions: [...permissionSet],
+          permissions: derivePermissions(user),
           // Prefer the user's home company; fall back to the first one
           // they belong to. Previously this always took companies[0],
           // which could silently drop somebody into the wrong tenant.
@@ -62,13 +82,9 @@ export const useAuthStore = create(
        * window focus so permission changes appear without a re-login.
        */
       refreshSession: ({ user, companies }) => {
-        const permissionSet = normalizePermissions(
-          user?.permissions ?? user?.roleInfo?.permissions
-        )
-
         set((state) => ({
           user,
-          permissions: [...permissionSet],
+          permissions: derivePermissions(user),
           companies: companies || state.companies,
           activeCompany:
             companies?.find((c) => c.id === state.activeCompany)?.id ||

@@ -58,6 +58,7 @@ export function classifyStatus(status) {
     on_leave: 'warning', inactive: 'gray', terminated: 'danger',
     suspended: 'danger', half_day: 'warning', present: 'success',
     absent: 'danger', late: 'warning', draft: 'gray', paid: 'success',
+    holiday: 'info',
     unpaid: 'danger', probation: 'info',
   }
   return map[status?.toLowerCase()] || 'gray'

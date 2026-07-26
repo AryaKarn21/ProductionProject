@@ -635,12 +635,31 @@ export default function EmployeeDetail() {
                   <Download size={16} /> Export History
                 </button>
 
-                <a
-                  href={`mailto:${employee.email}`}
-                  className="btn btn-secondary flex items-center justify-center gap-2"
+                <button
+                  type="button"
+                  disabled={!employee.email}
+                  title={
+                    employee.email
+                      ? undefined
+                      : "This employee has no email on file"
+                  }
+                  onClick={() =>
+                    navigate(
+                      `/email/compose?to=${encodeURIComponent(
+                        employee.email
+                      )}&subject=${encodeURIComponent(
+                        `Regarding ${
+                          employee.firstName
+                            ? `${employee.firstName} ${employee.lastName || ""}`.trim()
+                            : "your profile"
+                        }`
+                      )}`
+                    )
+                  }
+                  className="btn btn-secondary flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Mail size={16} /> Send Email
-                </a>
+                </button>
                 <button
                   onClick={() => {
                     setSelectedShiftId(employee.shiftId || employee.shift?.id || "");

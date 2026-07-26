@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   useMutation,
   useQuery,
@@ -102,8 +103,20 @@ function getAccountLabel(account) {
 export default function Compose() {
   const queryClient = useQueryClient();
 
+  const [searchParams] = useSearchParams();
+
+  /*
+   * Deep-link support: other pages (e.g. an employee's "Send Email"
+   * button) link here as /email/compose?to=someone@x.com&subject=...
+   * so the recipient/subject arrive pre-filled instead of forcing the
+   * user to retype an address the app already knows.
+   */
   const [form, setForm] =
-    useState(INITIAL_FORM);
+    useState(() => ({
+      ...INITIAL_FORM,
+      to: searchParams.get("to") || "",
+      subject: searchParams.get("subject") || "",
+    }));
 
   const [showCc, setShowCc] =
     useState(false);
@@ -596,9 +609,14 @@ export default function Compose() {
             !availableAccounts.length && (
               <p className="mt-2 text-sm text-amber-600 dark:text-amber-400 sm:ml-[86px]">
                 No email account is
-                available. Add an email
-                account before sending
-                messages.
+                available.{" "}
+                <Link
+                  to="/email/settings"
+                  className="font-semibold underline underline-offset-2 hover:text-amber-700 dark:hover:text-amber-300"
+                >
+                  Connect an email account
+                </Link>{" "}
+                before sending messages.
               </p>
             )}
         </div>

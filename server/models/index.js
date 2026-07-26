@@ -24,7 +24,7 @@ import Warehouse from "./Warehouse.js";
 import InventoryItem from "./InventoryItem.js";
 import Asset from "./Asset.js";
 import StockTransfer from "./StockTransfer.js";
-import StockAdjustment from "./StockAdjustment.js";
+import StockAdjustment from "./stockAdjustment.js";
 import Vendor from "./Vendor.js";
 import PurchaseOrder from "./PurchaseOrder.js";
 import PurchaseOrderItem from "./PurchaseOrderItem.js";
@@ -52,7 +52,7 @@ import {
   EmailFolder,
   EmailRule,
   EmailEvent,
-} from "./EmailModels.js";
+} from "./Emailmodels.js";
 
 
 
@@ -256,16 +256,25 @@ PerformanceReview.belongsTo(Employee, {
   foreignKey: "employeeId",
 });
 
-// Logged-in User who performs/submits the review
-User.hasMany(PerformanceReview, {
-  as: "performanceReviewsGiven",
+// Employee record of the person who performed/submitted the review.
+// reviewerId stores an employees.id — performance.routes.js looks up the
+// reviewer's Employee record and every query does
+// `include: [{ model: Employee, as: "reviewer" }]`. This association was
+// previously declared against User, which contradicted both the stored
+// data and those includes, so Sequelize threw SequelizeEagerLoadingError
+// ("Employee is not associated to PerformanceReview using alias
+// 'reviewer'") — the 400 that surfaced as the "check your input" toast on
+// the Performance tab.
+Employee.hasMany(PerformanceReview, {
+  as: "reviewsGiven",
   foreignKey: "reviewerId",
 });
 
-PerformanceReview.belongsTo(User, {
+PerformanceReview.belongsTo(Employee, {
   as: "reviewer",
   foreignKey: "reviewerId",
 });
+
 
 // Company
 PerformanceReview.belongsTo(Company, {

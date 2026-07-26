@@ -73,4 +73,4 @@ export const sendMeetingReminderEmail = async ({ to, recipientName, meeting, min
     subject: `Reminder: ${meeting.title} starts soon`,
     html: buildMeetingReminderHtml({ recipientName, meeting, minutesBefore }),
   });
-}; 
+};

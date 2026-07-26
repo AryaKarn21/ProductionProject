@@ -101,6 +101,25 @@ const ResetPassword = lazy(() => import("@/pages/auth/ResetPassword"));
 const ProfileSettings = lazy(() => import("@/pages/settings/ProfileSettings"));
 const Calendar = lazy(() => import("@/pages/calendar/Calendar"));
 
+// ── Email ─────────────────────────────────────────────────────
+// Aliased where the default export name collides with an existing
+// page (email/Dashboard.jsx and email/Settings.jsx both export a
+// component whose *internal* name shadows dashboard/Dashboard and
+// reports/Analytics — the import alias below is what matters, not
+// the function's own name).
+const EmailDashboard = lazy(() => import("@/pages/email/Dashboard"));
+const EmailInbox = lazy(() => import("@/pages/email/Inbox"));
+const EmailCompose = lazy(() => import("@/pages/email/Compose"));
+const EmailSent = lazy(() => import("@/pages/email/Sent"));
+const EmailDrafts = lazy(() => import("@/pages/email/Drafts"));
+const EmailArchive = lazy(() => import("@/pages/email/Archive"));
+const EmailSpam = lazy(() => import("@/pages/email/Spam"));
+const EmailStarred = lazy(() => import("@/pages/email/Starred"));
+const EmailTrash = lazy(() => import("@/pages/email/Trash"));
+const EmailTemplates = lazy(() => import("@/pages/email/Templates"));
+const EmailAnalytics = lazy(() => import("@/pages/email/Analytics"));
+const EmailSettings = lazy(() => import("@/pages/email/Settings"));
+
 // ── Suspense wrapper ─────────────────────────────────────────
 function PageLoader() {
   return (
@@ -397,6 +416,56 @@ export const router = createBrowserRouter([
           {
             path: "/reports",
             element: G("analytics.view", <Analytics />),
+          },
+
+          // ── Email ─────────────────────────────────────────
+          {
+            path: "/email",
+            element: G("email.view", <EmailDashboard />),
+          },
+          {
+            path: "/email/inbox",
+            element: G("email.view", <EmailInbox />),
+          },
+          {
+            path: "/email/compose",
+            element: G("email.create", <EmailCompose />),
+          },
+          {
+            path: "/email/sent",
+            element: G("email.view", <EmailSent />),
+          },
+          {
+            path: "/email/drafts",
+            element: G("email.view", <EmailDrafts />),
+          },
+          {
+            path: "/email/archive",
+            element: G("email.view", <EmailArchive />),
+          },
+          {
+            path: "/email/spam",
+            element: G("email.view", <EmailSpam />),
+          },
+          {
+            path: "/email/starred",
+            element: G("email.view", <EmailStarred />),
+          },
+          {
+            path: "/email/trash",
+            element: G("email.view", <EmailTrash />),
+          },
+          {
+            path: "/email/templates",
+            element: G("email.view", <EmailTemplates />),
+          },
+          {
+            path: "/email/analytics",
+            element: G("email.view", <EmailAnalytics />),
+          },
+          {
+            path: "/email/settings",
+            element: G("email.update", <EmailSettings />),
           },
 
           // ── Settings ──────────────────────────────────────

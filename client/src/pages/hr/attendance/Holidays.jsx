@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Plus, Pencil, Trash2 } from "lucide-react";
+import { CalendarDays, CalendarPlus, Plus, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import holidayAPI from "@/api/holiday.api";
+import {
+  getIndianHolidays,
+  AVAILABLE_INDIAN_HOLIDAY_YEARS,
+} from "@/lib/indianHolidays";
 
 const emptyForm = {
   name: "",
@@ -18,6 +22,12 @@ export default function Holidays() {
   const [editingHoliday, setEditingHoliday] = useState(null);
 
   const [form, setForm] = useState(emptyForm);
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importYear, setImportYear] = useState(
+    AVAILABLE_INDIAN_HOLIDAY_YEARS[AVAILABLE_INDIAN_HOLIDAY_YEARS.length - 1]
+  );
+  const [selectedDates, setSelectedDates] = useState(new Set());
 
   const {
     data,
@@ -100,6 +110,93 @@ export default function Holidays() {
       );
     },
   });
+
+  const importMutation = useMutation({
+    mutationFn: async (holidaysToAdd) => {
+      const results = await Promise.allSettled(
+        holidaysToAdd.map((h) =>
+          holidayAPI.create({ name: h.name, date: h.date, isActive: true })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { added: holidaysToAdd.length - failed, failed };
+    },
+
+    onSuccess: ({ added, failed }) => {
+      queryClient.invalidateQueries({ queryKey: ["holidays"] });
+
+      if (added > 0) {
+        toast.success(
+          `Added ${added} holiday${added === 1 ? "" : "s"} from the Indian calendar`
+        );
+      }
+      if (failed > 0) {
+        toast.error(`${failed} holiday${failed === 1 ? "" : "s"} could not be added`);
+      }
+      if (added === 0 && failed === 0) {
+        toast("No holidays selected");
+      }
+
+      closeImportModal();
+    },
+
+    onError: () => {
+      toast.error("Unable to import holidays");
+    },
+  });
+
+  const existingDates = new Set(
+    holidays.map((h) => String(h.date).slice(0, 10))
+  );
+
+  const calendarHolidays = getIndianHolidays(importYear);
+
+  const openImportModal = () => {
+    // Pre-select every calendar holiday for the year that isn't already
+    // configured, so admins usually just review and confirm.
+    setSelectedDates(
+      new Set(
+        calendarHolidays
+          .filter((h) => !existingDates.has(h.date))
+          .map((h) => h.date)
+      )
+    );
+    setShowImportModal(true);
+  };
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setSelectedDates(new Set());
+  };
+
+  const toggleSelectedDate = (date) => {
+    setSelectedDates((current) => {
+      const next = new Set(current);
+      if (next.has(date)) {
+        next.delete(date);
+      } else {
+        next.add(date);
+      }
+      return next;
+    });
+  };
+
+  const handleImportYearChange = (year) => {
+    setImportYear(year);
+    const holidaysForYear = getIndianHolidays(year);
+    setSelectedDates(
+      new Set(
+        holidaysForYear
+          .filter((h) => !existingDates.has(h.date))
+          .map((h) => h.date)
+      )
+    );
+  };
+
+  const handleImportSubmit = () => {
+    const holidaysToAdd = calendarHolidays.filter((h) => selectedDates.has(h.date));
+    importMutation.mutate(holidaysToAdd);
+  };
 
   const openCreate = () => {
     setEditingHoliday(null);
@@ -184,15 +281,27 @@ export default function Holidays() {
           </p>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-primary flex items-center gap-2"
-          onClick={openCreate}
-        >
-          <Plus size={16} />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary flex items-center gap-2"
+            onClick={openImportModal}
+          >
+            <CalendarPlus size={16} />
 
-          Add Holiday
-        </button>
+            Import Indian Holidays
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-primary flex items-center gap-2"
+            onClick={openCreate}
+          >
+            <Plus size={16} />
+
+            Add Holiday
+          </button>
+        </div>
 
       </div>
 
@@ -499,6 +608,159 @@ export default function Holidays() {
         )}
 
       </div>
+
+      {/* IMPORT INDIAN HOLIDAYS MODAL */}
+
+      {showImportModal && (
+
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.5)" }}
+          onClick={closeImportModal}
+        >
+
+          <div
+            className="card w-full max-w-lg max-h-[85vh] flex flex-col p-5"
+            onClick={(event) => event.stopPropagation()}
+          >
+
+            <div className="flex items-center justify-between mb-1">
+              <h2
+                className="font-semibold"
+                style={{ color: "var(--text-primary)" }}
+              >
+                Import Indian Public Holidays
+              </h2>
+
+              <select
+                className="form-input !w-auto text-sm"
+                value={importYear}
+                onChange={(event) =>
+                  handleImportYearChange(Number(event.target.value))
+                }
+              >
+                {AVAILABLE_INDIAN_HOLIDAY_YEARS.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <p
+              className="text-sm mb-4"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Based on the official Government of India gazetted holiday
+              calendar. Dates already added below are shown as
+              &quot;Already added&quot; and are skipped automatically.
+            </p>
+
+            {calendarHolidays.length === 0 ? (
+
+              <div
+                className="p-6 text-center text-sm"
+                style={{ color: "var(--text-muted)" }}
+              >
+                No calendar data available for {importYear} yet.
+              </div>
+
+            ) : (
+
+              <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+
+                {calendarHolidays.map((holiday) => {
+                  const alreadyAdded = existingDates.has(holiday.date);
+
+                  return (
+                    <label
+                      key={holiday.date}
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-lg"
+                      style={{
+                        border: "1px solid var(--border)",
+                        opacity: alreadyAdded ? 0.5 : 1,
+                      }}
+                    >
+
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          disabled={alreadyAdded}
+                          checked={
+                            alreadyAdded || selectedDates.has(holiday.date)
+                          }
+                          onChange={() => toggleSelectedDate(holiday.date)}
+                        />
+
+                        <div>
+                          <p
+                            className="text-sm font-medium"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {holiday.name}
+                          </p>
+
+                          <p
+                            className="text-xs"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {new Date(
+                              `${holiday.date}T00:00:00`
+                            ).toLocaleDateString(undefined, {
+                              weekday: "short",
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </p>
+                        </div>
+                      </div>
+
+                      {alreadyAdded && (
+                        <span
+                          className="text-xs shrink-0"
+                          style={{ color: "var(--text-muted)" }}
+                        >
+                          Already added
+                        </span>
+                      )}
+
+                    </label>
+                  );
+                })}
+
+              </div>
+
+            )}
+
+            <div className="flex justify-end gap-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeImportModal}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={importMutation.isPending || selectedDates.size === 0}
+                onClick={handleImportSubmit}
+              >
+                {importMutation.isPending
+                  ? "Importing..."
+                  : `Add ${selectedDates.size} Selected`}
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
 
     </div>
   );

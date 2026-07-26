@@ -52,13 +52,36 @@ const emailAPI = {
     return data;
   },
 
-  testConnection: async (id) => {
-    const { data } = await api.post(
-      `/email/accounts/${id}/test`
-    );
+   testConnection: async (id) => {
+  const { data } = await api.post(
+    `/email/accounts/${id}/test`
+  );
 
-    return data;
-  },
+  return data;
+},
+
+// ============================================================
+// GOOGLE OAUTH (Gmail connect / disconnect / status)
+// ============================================================
+
+// Get Google OAuth URL
+getGoogleAuthUrl: async () => {
+  const { data } = await api.get("/email/google");
+  return data; // { url }
+},
+
+// Get connected Google account
+getGoogleAccount: async () => {
+  const { data } = await api.get("/email/account");
+  return data;
+},
+
+// Disconnect Google account
+disconnectGoogle: async () => {
+  const { data } = await api.post("/email/disconnect");
+  return data;
+},
+
 
   // ============================================================
   // SYNCHRONIZATION

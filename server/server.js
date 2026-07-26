@@ -39,6 +39,7 @@ import meetingAttendeeRoutes from "./routes/meetingAttendees.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import emailRoutes from "./routes/email.routes.js";
+import googleAuthRoutes from "./routes/googleAuth.routes.js";
 import { startScheduler } from "./services/scheduler.service.js";
 
 const app = express();
@@ -256,6 +257,13 @@ app.use("/api/roles", protect, resolveCompany, rolesRoutes);
 app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
 app.use("/api/email", protect, resolveCompany, emailRoutes);
 
+// Google OAuth for Gmail. Mounted BEFORE the protected email router: it
+// applies `protect` per-route so the /google/callback redirect from Google
+// (which has no Authorization header) can run unauthenticated and verify
+// the signed `state` instead. All other /api/email/* paths fall through to
+// the protected emailRoutes below.
+app.use("/api/email", googleAuthRoutes);
+//app.use("/api/email", protect, resolveCompany, emailRoutes);
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
 app.use("/api", notFoundHandler);
