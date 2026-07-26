@@ -24,6 +24,8 @@ import {
 import { attendanceAPI } from "@/api/attendance.api";
 import { employeesAPI } from "@/api/employees.api";
 import { shiftsAPI } from "@/api/shifts.api";
+import { holidayAPI } from "@/api/holiday.api";
+import { CalendarHeart } from "lucide-react";
 import { useAuthStore } from "@/store/auth.store";
 import DataTable from "@/components/shared/DataTable";
 import FilterBar from "@/components/shared/FilterBar";
@@ -118,6 +120,21 @@ export default function AttendanceLogs() {
     queryFn: () => shiftsAPI.getAll().then((r) => r.data),
   });
   const shifts = shiftData || [];
+
+  // ── Holiday linking ─────────────────────────────────────────────────────
+  // Pulls the configured company holidays for the year currently in view so
+  // the attendance log can flag "this date is a holiday" even before the
+  // nightly finalization job has run (it only fills in past days).
+  const holidayYear = (params.dateFrom || today).slice(0, 4);
+  const { data: holidayData } = useQuery({
+    queryKey: ["holidays", holidayYear],
+    queryFn: () => holidayAPI.getAll({ year: holidayYear }).then((r) => r.data),
+  });
+  const holidays = holidayData?.holidays || holidayData?.data || [];
+  const isSingleDayView = !!params.dateFrom && params.dateFrom === params.dateTo;
+  const selectedHoliday = isSingleDayView
+    ? holidays.find((h) => h.isActive !== false && String(h.date).slice(0, 10) === params.dateFrom)
+    : null;
 
   const {
     register: regCI,
@@ -542,6 +559,19 @@ export default function AttendanceLogs() {
           </button>
         </div>
       </div>
+
+      {/* ── Holiday Banner ── */}
+      {selectedHoliday && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-blue-800/40 bg-blue-500/10 px-4 py-2.5 text-xs text-blue-300">
+          <CalendarHeart size={16} className="shrink-0" />
+          <span>
+            <strong className="font-semibold">{formatDate(params.dateFrom)}</strong> is a company holiday
+            — <strong className="font-semibold">{selectedHoliday.name}</strong>. Employees without another
+            record for this date will be auto-marked <strong className="font-semibold">Holiday</strong> rather
+            than Absent.
+          </span>
+        </div>
+      )}
 
       {/* ── Attendance Log Table ── */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">

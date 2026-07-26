@@ -29,11 +29,11 @@ function todayDateOnlyString() {
 }
 
 /**
- * Finalizes Absent records for ONE company on ONE past date.
+ * Finalizes Absent (or Holiday) records for ONE company on ONE past date.
  * Never touches today or a future date — that guard is enforced here so
  * every caller (cron, backfill, manual trigger) gets the same protection.
  *
- * Returns a summary: { date, skippedReason?, marked, alreadyPresent, onLeave, weeklyOff, holiday, notYetJoined, inactive }
+ * Returns a summary: { date, skippedReason?, marked, alreadyHasRecord, onApprovedLeave, weeklyOff, holiday, notYetJoined, inactive }
  */
 export async function finalizeAbsencesForDate(companyId, dateInput) {
   const date = toDateOnlyString(dateInput);
@@ -55,14 +55,15 @@ export async function finalizeAbsencesForDate(companyId, dateInput) {
     return { ...summary, skippedReason: "not_a_past_date" };
   }
 
-  // Rule: not a company holiday — if the whole company is on holiday,
-  // nothing for this date should be marked absent at all.
+  // Rule: link company holidays into attendance — if the whole company is
+  // on holiday, employees are never marked "absent" for that date. Instead
+  // an explicit "holiday" Attendance row is created per eligible employee so
+  // the day is visibly linked/accounted for in the attendance log, stat
+  // cards, monthly summaries, and payroll — rather than the date silently
+  // having no record at all.
   const holiday = await Holiday.findOne({
     where: { companyId, date, isActive: true },
   });
-  if (holiday) {
-    return { ...summary, skippedReason: "company_holiday", holiday: 1 };
-  }
 
   // Rule: employee must have been active AND already joined on/before this date.
   // NOTE: Employee.status is the *current* status, not a point-in-time history —
@@ -78,7 +79,7 @@ export async function finalizeAbsencesForDate(companyId, dateInput) {
   });
 
   if (!employees.length) {
-    return summary;
+    return holiday ? { ...summary, skippedReason: "company_holiday" } : summary;
   }
 
   const employeeIds = employees.map((e) => e.id);
@@ -119,6 +120,25 @@ export async function finalizeAbsencesForDate(companyId, dateInput) {
       continue;
     }
 
+    if (holiday) {
+      // Holiday takes precedence over weekly-off — either way nobody gets
+      // marked absent, but we still want a "holiday" row so the day shows
+      // up (linked to the holiday) instead of just being blank.
+      rowsToCreate.push({
+        companyId,
+        employeeId: employee.id,
+        shiftId: employee.shiftId || null,
+        date,
+        status: "holiday",
+        approvalStatus: "approved",
+        hoursWorked: 0,
+        overtimeHours: 0,
+        notes: `Company holiday: ${holiday.name}`,
+      });
+      summary.holiday += 1;
+      continue;
+    }
+
     // Rule: it was a scheduled working day / not a weekly off.
     if (isWeeklyOff(date, employee.shift)) {
       summary.weeklyOff += 1;
@@ -140,10 +160,10 @@ export async function finalizeAbsencesForDate(companyId, dateInput) {
 
   if (rowsToCreate.length) {
     await Attendance.bulkCreate(rowsToCreate);
-    summary.marked = rowsToCreate.length;
+    summary.marked = rowsToCreate.filter((r) => r.status === "absent").length;
   }
 
-  return summary;
+  return holiday ? { ...summary, skippedReason: "company_holiday" } : summary;
 }
 
 /**

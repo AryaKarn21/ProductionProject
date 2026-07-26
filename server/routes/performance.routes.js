@@ -522,90 +522,119 @@ router.post(
       //
       // logEvent.userId expects users.id,
       // therefore req.user.id is correct here.
+      //
+      // This (and the notification below) are side effects of a review
+      // that has ALREADY been saved. If either throws — e.g. a stale/
+      // orphaned employee.userId that no longer matches any row in
+      // users (FK violation) — we do not want the client to see a
+      // failure and possibly resubmit, creating a duplicate review.
+      // So these are caught and logged, never allowed to fail the
+      // response.
       // ------------------------------------------------------
 
-      await logEvent({
-        companyId,
-
-        userId: req.user.id,
-
-        action:
-          "performance_review_created",
-
-        resourceId: employee.id,
-
-        changes: {
-          reviewId: review.id,
-
-          reviewPeriod:
-            review.reviewPeriod,
-
-          overallRating:
-            review.overallRating,
-
-          reviewerEmployeeId:
-            reviewer.id,
-        },
-      });
-
-      // ------------------------------------------------------
-      // Promotion audit
-      // ------------------------------------------------------
-
-      if (Boolean(promotionEligible)) {
+      try {
         await logEvent({
           companyId,
 
           userId: req.user.id,
 
-          action: "promotion",
+          action:
+            "performance_review_created",
 
           resourceId: employee.id,
 
           changes: {
             reviewId: review.id,
 
-            note:
-              "Flagged promotion eligible in performance review",
+            reviewPeriod:
+              review.reviewPeriod,
+
+            overallRating:
+              review.overallRating,
+
+            reviewerEmployeeId:
+              reviewer.id,
           },
         });
+
+        // ------------------------------------------------------
+        // Promotion audit
+        // ------------------------------------------------------
+
+        if (Boolean(promotionEligible)) {
+          await logEvent({
+            companyId,
+
+            userId: req.user.id,
+
+            action: "promotion",
+
+            resourceId: employee.id,
+
+            changes: {
+              reviewId: review.id,
+
+              note:
+                "Flagged promotion eligible in performance review",
+            },
+          });
+        }
+      } catch (auditError) {
+        console.error(
+          "performance_review_created audit log failed (review was still saved):",
+          auditError,
+        );
       }
 
       // ------------------------------------------------------
       // Notify reviewed employee
+      //
+      // employee.userId can be stale (e.g. the linked user account was
+      // later deleted/deactivated) without the Employee row being
+      // cleaned up. In that case this insert would violate the
+      // Notification -> User foreign key. That must not take down an
+      // otherwise-successful review submission.
       // ------------------------------------------------------
 
       if (employee.userId) {
-        await createNotification({
-          companyId,
+        try {
+          await createNotification({
+            companyId,
 
-          // Notifications reference users.id
-          userId: employee.userId,
+            // Notifications reference users.id
+            userId: employee.userId,
 
-          // Sender is also users.id
-          senderId: req.user.id,
+            // Sender is also users.id
+            senderId: req.user.id,
 
-          module: "hr",
+            module: "hr",
 
-          type: "performance_review",
+            type: "performance_review",
 
-          title:
-            "New Performance Review",
+            title:
+              "New Performance Review",
 
-          message:
-            `A performance review for ` +
-            `${review.reviewPeriod} has been submitted.`,
+            message:
+              `A performance review for ` +
+              `${review.reviewPeriod} has been submitted.`,
 
-          priority: "medium",
+            priority: "medium",
 
-          actionUrl:
-            `/hr/employees/${employee.id}` +
-            `?tab=performance`,
+            actionUrl:
+              `/hr/employees/${employee.id}` +
+              `?tab=performance`,
 
-          metadata: {
-            reviewId: review.id,
-          },
-        });
+            metadata: {
+              reviewId: review.id,
+            },
+          });
+        } catch (notifyError) {
+          console.error(
+            `performance_review notification failed for employee ${employee.id} ` +
+            `(stale/orphaned userId ${employee.userId}?) — review was still saved:`,
+            notifyError,
+          );
+        }
       }
 
       // ------------------------------------------------------

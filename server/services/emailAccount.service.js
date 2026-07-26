@@ -76,7 +76,33 @@ export const applyProviderPreset = (provider, data = {}) => {
 };
 
 /** Nodemailer transporter for a stored account (decrypts on the fly). */
+/** Nodemailer transporter for a stored account (decrypts on the fly). */
 export const buildTransporter = (account) => {
+  // OAuth2 (Gmail) accounts: authenticate with the encrypted refresh token.
+  // Nodemailer's XOAUTH2 support uses clientId/clientSecret + refreshToken to
+  // mint a fresh access token automatically whenever the current one has
+  // expired — so users are never forced to reconnect over a stale token.
+  if (account.authType === "oauth2" && account.provider === "gmail") {
+    const refreshToken = decrypt(account.encRefreshToken);
+    const accessToken = decrypt(account.encAccessToken);
+    return nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        type: "OAuth2",
+        user: account.email,
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        refreshToken,
+        // Optional: seed the current token so nodemailer can skip a refresh
+        // round-trip when it is still valid. Omitted safely if null.
+        ...(accessToken ? { accessToken } : {}),
+      },
+    });
+  }
+
+  // Legacy SMTP + app-password accounts.
   const password = decrypt(account.encPassword);
   return nodemailer.createTransport({
     host: account.smtpHost,
