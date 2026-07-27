@@ -1,4 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { 
   DollarSign, 
   Wallet, 
@@ -21,9 +24,25 @@ import RevenueExpenseChart from "@/components/finance/RevenueExpenseChart";
 import CashFlowChart from "@/components/finance/CashFlowChart";
 import ExpenseCategoryChart from "@/components/finance/ExpenseCategoryChart";
 import IncomeSourceChart from "@/components/finance/IncomeSourceChart";
+import LedgerModal from "@/pages/finance/ledger/LedgerModal";
 
 export default function FinanceOverview() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
   const { user, activeCompany, companies } = useAuthStore();
+
+  const createMutation = useMutation({
+    mutationFn: financeAPI.createEntry,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["finance-overview"] });
+      setModalOpen(false);
+      toast.success("Transaction recorded successfully");
+    },
+    onError: (err) =>
+      toast.error(err?.response?.data?.message || "Failed to record transaction"),
+  });
   const companyName =
     (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
     user?.companyName ||
@@ -68,7 +87,10 @@ export default function FinanceOverview() {
             Export Statement
           </button>
 
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-950 transition-colors">
+          <button
+            onClick={() => setModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-950 transition-colors"
+          >
             <Plus size={15} /> Record Transaction
           </button>
         </div>
@@ -143,7 +165,10 @@ export default function FinanceOverview() {
             </h3>
             <p className="text-[11px] text-slate-500">Latest entries across accounts</p>
           </div>
-          <button className="text-xs font-semibold text-blue-400 hover:text-blue-300">
+          <button
+            onClick={() => navigate("/finance/ledger")}
+            className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+          >
             View All Ledger Entries →
           </button>
         </div>
@@ -187,6 +212,13 @@ export default function FinanceOverview() {
           )}
         </div>
       </div>
+      {/* ── Record Transaction Modal ── */}
+      <LedgerModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSubmit={(values) => createMutation.mutate(values)}
+        loading={createMutation.isPending}
+      />
     </div>
   );
 }

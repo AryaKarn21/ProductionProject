@@ -90,7 +90,16 @@ function CompanyTab() {
   const [editingCompany, setEditingCompany] = useState(null)
   const { refreshCompanies } = useAuthStore()
 
-  const { register, handleSubmit, reset } = useForm({
+  // ── Reusable field wrapper — avoids repeating label + input markup ──
+  const FormField = ({ label, children }) => (
+    <div className="space-y-1">
+      <label className="font-semibold text-slate-300">{label}</label>
+      {children}
+    </div>
+  )
+  const inputCls = "w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: {
       name: '',
       industry: '',
@@ -260,62 +269,58 @@ function CompanyTab() {
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-300">Company Name *</label>
+              <FormField label="Company Name *">
                 <input
-                  {...register('name', { required: true })}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
+                  {...register('name', { required: 'Company name is required' })}
+                  className={inputCls}
                   placeholder="e.g. OS Group Pvt Ltd"
                 />
+                {errors.name && <p className="text-red-400 text-[11px] mt-0.5">{errors.name.message}</p>}
+              </FormField>
+
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Industry">
+                  <input {...register('industry')} className={inputCls} placeholder="e.g. Technology" />
+                </FormField>
+                <FormField label="Website">
+                  <input {...register('website')} className={inputCls} placeholder="https://..." />
+                </FormField>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">Industry</label>
+                <FormField label="Email Address">
+                  <input {...register('email')} className={inputCls} placeholder="info@company.com" type="email" />
+                </FormField>
+                <FormField label="Phone">
                   <input
-                    {...register('industry')}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
-                    placeholder="e.g. Technology"
+                    {...register('phone', {
+                      pattern: {
+                        value: /^\d{10}$/,
+                        message: 'Phone must be exactly 10 digits',
+                      },
+                    })}
+                    className={inputCls}
+                    placeholder="10-digit number"
+                    maxLength={10}
+                    inputMode="numeric"
+                    onKeyDown={(e) => {
+                      // allow: backspace, delete, tab, arrows, home, end
+                      const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','Home','End']
+                      if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault()
+                    }}
                   />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">Website</label>
-                  <input
-                    {...register('website')}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
-                    placeholder="https://..."
-                  />
-                </div>
+                  {errors.phone && <p className="text-red-400 text-[11px] mt-0.5">{errors.phone.message}</p>}
+                </FormField>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">Email Address</label>
-                  <input
-                    {...register('email')}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
-                    placeholder="info@company.com"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">Phone</label>
-                  <input
-                    {...register('phone')}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
-                    placeholder="+977..."
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-300">Address</label>
+              <FormField label="Address">
                 <textarea
                   {...register('address')}
                   rows={2}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
+                  className={inputCls}
                   placeholder="Headquarters physical address..."
                 />
-              </div>
+              </FormField>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
