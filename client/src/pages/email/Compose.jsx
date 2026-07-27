@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   useMutation,
@@ -77,6 +77,18 @@ function getErrorMessage(error, fallback) {
   );
 }
 
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// 25 MB per file / 10 files max — mirrors the backend's uploadEmailAttachment
+// limits so the user gets instant feedback instead of a round-trip error.
+const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+
 function getAccountLabel(account) {
   const name =
     account?.displayName ||
@@ -133,6 +145,49 @@ export default function Compose() {
     successMessage,
     setSuccessMessage,
   ] = useState("");
+
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const fileInputRef = useRef(null);
+
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFilesSelected = (event) => {
+    const incoming = Array.from(event.target.files || []);
+    // Allow picking the same file again later by clearing the input value.
+    event.target.value = "";
+
+    if (!incoming.length) return;
+
+    setAttachmentError("");
+
+    setAttachments((previous) => {
+      const combined = [...previous];
+
+      for (const file of incoming) {
+        if (combined.length >= MAX_ATTACHMENTS) {
+          setAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} files.`);
+          break;
+        }
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          setAttachmentError(`"${file.name}" is over the 25 MB limit.`);
+          continue;
+        }
+        const isDuplicate = combined.some(
+          (existing) => existing.name === file.name && existing.size === file.size
+        );
+        if (!isDuplicate) combined.push(file);
+      }
+
+      return combined;
+    });
+  };
+
+  const handleRemoveAttachment = (index) => {
+    setAttachments((previous) => previous.filter((_, i) => i !== index));
+  };
 
   const {
     data: accountsData,
@@ -322,6 +377,10 @@ export default function Compose() {
       payload.bcc = bcc;
     }
 
+    if (attachments.length) {
+      payload.attachments = attachments;
+    }
+
     return payload;
   };
 
@@ -458,6 +517,9 @@ export default function Compose() {
 
     setValidationError("");
 
+    setAttachments([]);
+    setAttachmentError("");
+
     sendMutation.reset();
     draftMutation.reset();
   };
@@ -477,6 +539,7 @@ export default function Compose() {
 
   const errorMessage =
     validationError ||
+    attachmentError ||
     (mutationError
       ? getErrorMessage(
           mutationError,
@@ -916,16 +979,21 @@ export default function Compose() {
               )}
             </button>
 
-            {/*
-              Disabled intentionally until the backend attachment
-              upload contract is verified.
-            */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={handleFilesSelected}
+            />
+
             <button
               type="button"
-              disabled
-              title="Attachments are not connected yet"
+              onClick={handleAttachClick}
+              disabled={isSubmitting}
               aria-label="Attach file"
-              className="flex h-10 w-10 cursor-not-allowed items-center justify-center rounded-lg text-gray-400 opacity-50"
+              title="Attach file"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white"
             >
               <Paperclip
                 size={18}
@@ -959,6 +1027,33 @@ export default function Compose() {
             </button>
           </div>
         </footer>
+
+        {/* Selected attachments */}
+        {attachments.length > 0 && (
+          <div className="flex shrink-0 flex-wrap gap-2 border-t border-gray-200 bg-gray-50/50 px-4 py-3 dark:border-gray-800 dark:bg-gray-950 sm:px-5">
+            {attachments.map((file, index) => (
+              <span
+                key={`${file.name}-${file.size}-${index}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
+              >
+                <FileText size={13} className="shrink-0 text-gray-400" />
+                <span className="max-w-[160px] truncate">{file.name}</span>
+                <span className="shrink-0 text-gray-400">
+                  {formatFileSize(file.size)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveAttachment(index)}
+                  disabled={isSubmitting}
+                  aria-label={`Remove ${file.name}`}
+                  className="ml-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );

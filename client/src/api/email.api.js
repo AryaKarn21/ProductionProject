@@ -1,5 +1,41 @@
 import api from "./axios";
 
+/*
+ * Turn a { to, cc, subject, ..., attachments: File[] } payload into a
+ * multipart/form-data body when there are files to send, so it matches
+ * what the backend's multer middleware (uploadEmailAttachment) expects.
+ * Array fields (to/cc/bcc) become comma-separated strings — the backend's
+ * parseAddressList() already splits on commas, so this round-trips fine.
+ * When there are no attachments we still send plain JSON — no behavior
+ * change for the existing no-attachment path.
+ */
+function toRequestBody(payload) {
+  const { attachments, ...fields } = payload || {};
+
+  if (!attachments || !attachments.length) {
+    return { body: fields, headers: undefined };
+  }
+
+  const formData = new FormData();
+
+  Object.entries(fields).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    formData.append(
+      key,
+      Array.isArray(value) ? value.join(",") : value
+    );
+  });
+
+  attachments.forEach((file) => {
+    formData.append("attachments", file);
+  });
+
+  // Let the browser set Content-Type (with the multipart boundary) itself —
+  // our axios instance defaults to application/json, which would break
+  // multer's parsing if left in place for a FormData body.
+  return { body: formData, headers: { "Content-Type": undefined } };
+}
+
 const emailAPI = {
   // ============================================================
   // EMAIL ACCOUNTS
@@ -223,18 +259,22 @@ disconnectGoogle: async () => {
   // ============================================================
 
   sendEmail: async (payload) => {
+    const { body, headers } = toRequestBody(payload);
     const { data } = await api.post(
       "/email/send",
-      payload
+      body,
+      headers ? { headers } : undefined
     );
 
     return data;
   },
 
   saveDraft: async (payload) => {
+    const { body, headers } = toRequestBody(payload);
     const { data } = await api.post(
       "/email/draft",
-      payload
+      body,
+      headers ? { headers } : undefined
     );
 
     return data;

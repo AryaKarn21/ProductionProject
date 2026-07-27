@@ -1,28 +1,17 @@
 // ─────────────────────────────────────────────────────────────
 // EMAIL ATTACHMENT UPLOAD (multer)
-// Mirrors the uploadReceipt.js convention: disk storage, UUID filenames,
-// mime allow-list, size cap. Executables are never accepted.
+// Memory storage: Vercel (and most serverless platforms) run functions on
+// a read-only filesystem with no persistent disk between invocations, so
+// multer.diskStorage() cannot work in production there — it either throws
+// or silently vanishes before the file can be attached/sent. Keeping the
+// upload in memory (file.buffer) instead means it only ever needs to
+// survive for the lifetime of a single request, which serverless supports
+// fine. Mime allow-list + size cap unchanged; executables are never accepted.
 // ─────────────────────────────────────────────────────────────
 import multer from "multer";
-import fs from "fs";
 import path from "path";
-import crypto from "crypto";
 
-const uploadPath = path.join(process.cwd(), "uploads", "email");
-
-if (!fs.existsSync(uploadPath)) {
-  fs.mkdirSync(uploadPath, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, uploadPath);
-  },
-  filename(req, file, cb) {
-    // Never trust originalname on disk — store as UUID + extension.
-    cb(null, crypto.randomUUID() + path.extname(file.originalname).toLowerCase());
-  },
-});
+const storage = multer.memoryStorage();
 
 // Deliberately broad (email carries many document types) but no
 // executables / scripts / archives that commonly smuggle malware.

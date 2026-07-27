@@ -76,6 +76,11 @@ export default function AttendanceLogs() {
 
   // ── Company details ────────────────────────────────────────────────────────
   const { user, activeCompany, companies } = useAuthStore();
+
+  // ── Role check ────────────────────────────────────────────────────────────
+  const PRIVILEGED_ROLES = ["super_admin", "admin", "manager", "accountant"];
+  const isPrivileged = PRIVILEGED_ROLES.includes(user?.role);
+  // ─────────────────────────────────────────────────────────────────────────
   const companyName =
     (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
     user?.companyName ||
@@ -108,8 +113,17 @@ export default function AttendanceLogs() {
   const { data: empData } = useQuery({
     queryKey: ["employees-all"],
     queryFn: () => employeesAPI.getAll({ limit: 200 }).then((r) => r.data),
+    enabled: isPrivileged, // employees don't need the full list
   });
-  const employees = empData?.employees || [];
+
+  // For non-privileged users, build a fake "employees" list with just themselves
+  // so the Log Attendance dropdown shows only their own name
+  const selfEmployee = user?.employee?.id
+    ? [{ id: user.employee.id, firstName: user.name?.split(" ")[0] || user.name || "", lastName: user.name?.split(" ").slice(1).join(" ") || "", department: user.employee.department || "" }]
+    : [];
+  const employees = isPrivileged
+    ? (empData?.employees || [])
+    : selfEmployee;
   const departments = useMemo(
     () => [...new Set(employees.map((e) => e.department).filter(Boolean))],
     [employees]
@@ -491,7 +505,8 @@ export default function AttendanceLogs() {
       {/* ── Metric Summary Cards ── */}
       <AttendanceStatCards records={statsRecords} loading={statsLoading} />
 
-      {/* ── Unified Filter & Search Bar ── */}
+      {/* ── Unified Filter & Search Bar — only for privileged roles ── */}
+      {isPrivileged && (
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 space-y-3 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex-1">
@@ -559,6 +574,7 @@ export default function AttendanceLogs() {
           </button>
         </div>
       </div>
+      )} {/* end isPrivileged filter bar */}
 
       {/* ── Holiday Banner ── */}
       {selectedHoliday && (

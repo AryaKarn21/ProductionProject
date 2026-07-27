@@ -30,6 +30,7 @@ export default function FinanceOverview() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const { user, activeCompany, companies } = useAuthStore();
 
   const createMutation = useMutation({
@@ -43,10 +44,48 @@ export default function FinanceOverview() {
     onError: (err) =>
       toast.error(err?.response?.data?.message || "Failed to record transaction"),
   });
+
   const companyName =
     (Array.isArray(companies) && companies.find((c) => c.id === activeCompany)?.name) ||
     user?.companyName ||
     "OS Group of Companies";
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await financeAPI.getLedgerEntries({ limit: 5000, page: 1 });
+      const entries = res.data?.entries || res.data?.ledger || [];
+      const header = ["Date", "Description", "Type", "Category", "Account", "Amount", "Currency", "Reference", "Notes"];
+      const csvRows = entries.map((e) => [
+        e.date ? new Date(e.date).toISOString().slice(0, 10) : "",
+        (e.description || "").replace(/[",\r\n]/g, " "),
+        e.type || "",
+        e.category || "",
+        e.accountName || e.account?.name || "",
+        e.amount ?? "",
+        e.currency || "NPR",
+        e.reference || "",
+        (e.notes || "").replace(/[",\r\n]/g, " "),
+      ]);
+      const csv = [header, ...csvRows]
+        .map((row) => row.map((cell) => `"${cell}"`).join(","))
+        .join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `finance-statement-${companyName.replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${entries.length} entries`);
+    } catch {
+      toast.error("Export failed — please try again");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["finance-overview"],
@@ -82,9 +121,13 @@ export default function FinanceOverview() {
             <span>YTD 2026</span>
           </div>
 
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors disabled:opacity-60"
+          >
             <Download size={14} className="text-slate-400" />
-            Export Statement
+            {exporting ? "Exporting..." : "Export Statement"}
           </button>
 
           <button
