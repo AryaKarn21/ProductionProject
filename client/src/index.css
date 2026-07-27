@@ -117,6 +117,17 @@
     box-shadow: var(--shadow-sm);
   }
 
+  /* Hides the scrollbar visually while keeping the element scrollable.
+     Used on horizontally-scrolling tab/pill strips so overflow doesn't
+     show a chunky native scrollbar track. */
+  .no-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* old Edge/IE */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Chromium Edge */
+  }
+
   .input {
     width: 100%;
     padding: 7px 12px;

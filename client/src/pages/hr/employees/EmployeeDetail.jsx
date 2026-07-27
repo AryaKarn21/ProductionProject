@@ -326,23 +326,23 @@ export default function EmployeeDetail() {
   const openEditReview = (review) => {
     setEditingReviewId(review.id);
     setReviewForm({
-      reviewPeriod:                review.reviewPeriod || "",
-      reviewDate:                  review.reviewDate?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-      technicalSkills:             review.technicalSkills ?? 3,
-      communication:               review.communication ?? 3,
-      leadership:                  review.leadership ?? 3,
-      teamwork:                    review.teamwork ?? 3,
-      productivity:                review.productivity ?? 3,
-      problemSolving:              review.problemSolving ?? 3,
-      attendanceRating:            review.attendanceRating ?? 3,
-      behaviour:                   review.behaviour ?? 3,
-      learningAbility:             review.learningAbility ?? 3,
-      goalAchievement:             review.goalAchievement ?? 3,
-      strengths:                   review.strengths || "",
-      weaknesses:                  review.weaknesses || "",
-      managerFeedback:             review.managerFeedback || "",
-      employeeFeedback:            review.employeeFeedback || "",
-      promotionEligible:           review.promotionEligible || false,
+      reviewPeriod: review.reviewPeriod || "",
+      reviewDate: review.reviewDate?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+      technicalSkills: review.technicalSkills ?? 3,
+      communication: review.communication ?? 3,
+      leadership: review.leadership ?? 3,
+      teamwork: review.teamwork ?? 3,
+      productivity: review.productivity ?? 3,
+      problemSolving: review.problemSolving ?? 3,
+      attendanceRating: review.attendanceRating ?? 3,
+      behaviour: review.behaviour ?? 3,
+      learningAbility: review.learningAbility ?? 3,
+      goalAchievement: review.goalAchievement ?? 3,
+      strengths: review.strengths || "",
+      weaknesses: review.weaknesses || "",
+      managerFeedback: review.managerFeedback || "",
+      employeeFeedback: review.employeeFeedback || "",
+      promotionEligible: review.promotionEligible || false,
       salaryIncrementRecommendation: review.salaryIncrementRecommendation || 0,
     });
     setReviewModalOpen(true);
@@ -648,10 +648,9 @@ export default function EmployeeDetail() {
                       `/email/compose?to=${encodeURIComponent(
                         employee.email
                       )}&subject=${encodeURIComponent(
-                        `Regarding ${
-                          employee.firstName
-                            ? `${employee.firstName} ${employee.lastName || ""}`.trim()
-                            : "your profile"
+                        `Regarding ${employee.firstName
+                          ? `${employee.firstName} ${employee.lastName || ""}`.trim()
+                          : "your profile"
                         }`
                       )}`
                     )
@@ -671,9 +670,8 @@ export default function EmployeeDetail() {
                 </button>
                 <button
                   onClick={() => navigate(`/hr/employees/${employee.id}/edit`)}
-                  className="btn btn-primary"
-                >
-                  Edit Employee
+                  className="btn btn-primary flex items-center justify-center gap-2">
+                  <Edit2 size={16} /> Edit Employee
                 </button>
               </div>
             </div>
@@ -1206,10 +1204,10 @@ export default function EmployeeDetail() {
 
                     {/* ── Stat cards ── */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <StatCard title="Avg. Rating"   value={<StarRating value={stats?.performance?.averageRating ?? 0} count={1} size={14} />} icon={Star}      color="warning" />
-                      <StatCard title="Total Reviews" value={reviews.length}                                                                   icon={BarChart2}   color="info" />
-                      <StatCard title="Promotion Eligible" value={reviews.filter((r) => r.promotionEligible).length > 0 ? "Yes" : "No"}       icon={Award}       color={reviews.filter((r) => r.promotionEligible).length ? "success" : "default"} />
-                      <StatCard title="Latest Period" value={reviews[0]?.reviewPeriod || "—"}                                                  icon={CheckSquare} color="primary" />
+                      <StatCard title="Avg. Rating" value={<StarRating value={stats?.performance?.averageRating ?? 0} count={1} size={14} />} icon={Star} color="warning" />
+                      <StatCard title="Total Reviews" value={reviews.length} icon={BarChart2} color="info" />
+                      <StatCard title="Promotion Eligible" value={reviews.filter((r) => r.promotionEligible).length > 0 ? "Yes" : "No"} icon={Award} color={reviews.filter((r) => r.promotionEligible).length ? "success" : "default"} />
+                      <StatCard title="Latest Period" value={reviews[0]?.reviewPeriod || "—"} icon={CheckSquare} color="primary" />
                     </div>
 
                     {/* ── Review cards ── */}
@@ -1294,10 +1292,10 @@ export default function EmployeeDetail() {
 
                               {/* Narratives */}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <ReviewNote label="Strengths"           text={review.strengths} />
-                                <ReviewNote label="Areas to Improve"    text={review.weaknesses} />
-                                <ReviewNote label="Manager Feedback"    text={review.managerFeedback} />
-                                <ReviewNote label="Employee Feedback"   text={review.employeeFeedback} />
+                                <ReviewNote label="Strengths" text={review.strengths} />
+                                <ReviewNote label="Areas to Improve" text={review.weaknesses} />
+                                <ReviewNote label="Manager Feedback" text={review.managerFeedback} />
+                                <ReviewNote label="Employee Feedback" text={review.employeeFeedback} />
                               </div>
 
                               {review.salaryIncrementRecommendation > 0 && (
@@ -1407,8 +1405,8 @@ export default function EmployeeDetail() {
                                         {(asset.category || "").toLowerCase() === "laptop"
                                           ? <Laptop size={13} style={{ color: "var(--primary)" }} />
                                           : (asset.category || "").toLowerCase() === "monitor"
-                                          ? <Monitor size={13} style={{ color: "var(--info)" }} />
-                                          : <Package size={13} style={{ color: "var(--text-muted)" }} />}
+                                            ? <Monitor size={13} style={{ color: "var(--info)" }} />
+                                            : <Package size={13} style={{ color: "var(--text-muted)" }} />}
                                       </span>
                                       <span className="font-medium text-[13px]" style={{ color: "var(--text-primary)" }}>
                                         {asset.name}

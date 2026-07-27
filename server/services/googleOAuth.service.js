@@ -27,10 +27,8 @@ import { sequelize } from "../config/db.js";
 
 // Identity (openid / email / profile) + permission to send mail.
 export const GOOGLE_SCOPES = [
-  "openid",
-  "email",
-  "profile",
-  "https://www.googleapis.com/auth/gmail.send",
+  "openid", "email", "profile",
+  "https://mail.google.com/",
 ];
 
 // The `state` param is signed so the (public) callback can prove this
