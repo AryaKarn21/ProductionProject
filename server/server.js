@@ -8,6 +8,7 @@ import { sequelize } from "./config/db.js";
 import "./models/index.js"; // registers all associations before sync/queries run
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
 import authRoutes from "./routes/auth.routes.js";
 import leadsRoutes from "./routes/leads.routes.js";
@@ -64,6 +65,81 @@ if (process.env.JWT_SECRET.length < 32) {
     '  node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"'
   );
   process.exit(1);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Leaked-credential guard
+|--------------------------------------------------------------------------
+| server/.env was committed in 323f0ff ("Initial commit") to a PUBLIC
+| repository, exposing the production JWT_SECRET and database password.
+| Anyone holding the old JWT_SECRET can forge a token for any user,
+| including super_admin, which defeats every authorisation check in this
+| codebase; the database password grants direct access, bypassing the
+| application entirely.
+|
+| Both were rotated. This guard refuses to start if a leaked value ever
+| comes back — from an old backup, a stale deploy, a teammate's copy of
+| .env, or a restored snapshot. Silent reintroduction is the realistic
+| failure mode, and it would be invisible without this.
+|
+| The values are compared as SHA-256 digests so the secrets themselves
+| are not reintroduced into the repository in plaintext. A digest is
+| useless to an attacker who does not already have the secret — and one
+| who does can read it in the public git history anyway.
+*/
+const sha256 = (value) =>
+  crypto.createHash("sha256").update(String(value)).digest("hex");
+
+/*
+ * JWT_SECRET is FATAL.
+ *
+ * The API is the attack surface here: anyone with the old secret can
+ * mint a token for any user, including super_admin, and every
+ * authorisation check in this codebase then passes. Refusing to start
+ * genuinely removes that. Rotating costs nothing — generate a new
+ * random string — so failing closed is cheap and correct.
+ */
+const LEAKED_JWT_SECRET =
+  "5f3695c6065041289cdfade7938338e3be58e2ac0d23782d52655361a42e1e8e";
+
+if (process.env.JWT_SECRET && sha256(process.env.JWT_SECRET) === LEAKED_JWT_SECRET) {
+  console.error(
+    "\nFATAL: JWT_SECRET is the value published in this repository's " +
+    "public git history.\n" +
+    "Anyone holding it can forge a token for any user, including " +
+    "super_admin.\n\n" +
+    "  Generate a replacement:\n" +
+    '    node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"\n\n' +
+    "  Rotating signs every user out. That is intended — tokens forged\n" +
+    "  with the old secret stop working immediately.\n"
+  );
+  process.exit(1);
+}
+
+/*
+ * DB_PASSWORD is a WARNING, deliberately not fatal.
+ *
+ * Refusing to boot would not protect anything. An attacker holding the
+ * database password connects to MySQL directly and never touches this
+ * process — so failing closed here costs a working environment and buys
+ * no security whatsoever. The only real fix is rotating it in the
+ * hosting panel, and nagging loudly on every start is the honest way to
+ * keep that visible without breaking the app in the meantime.
+ */
+const LEAKED_DB_PASSWORD =
+  "2c321e183c3e756d60538f38cee0d2352e0174abfca8ad602171b80d77295e38";
+
+if (process.env.DB_PASSWORD && sha256(process.env.DB_PASSWORD) === LEAKED_DB_PASSWORD) {
+  console.warn(
+    "\n" + "!".repeat(72) + "\n" +
+    "  SECURITY: DB_PASSWORD is the value published in this repository's\n" +
+    "  public git history. Anyone who has seen the repo can connect to\n" +
+    "  this database directly and read or modify every company's data,\n" +
+    "  bypassing the application entirely.\n\n" +
+    "  Rotate it in Hostinger -> Databases, update DB_PASSWORD, restart.\n" +
+    "!".repeat(72) + "\n"
+  );
 }
 
 /*
