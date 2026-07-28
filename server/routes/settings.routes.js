@@ -517,24 +517,39 @@ router.get(
       let blockedCount = 0
 
       if (req.user.role === 'super_admin') {
+        /*
+         * unassignedCount counts EVERY account with no home company,
+         * including deactivated ones. It controls whether the "Review
+         * them" toggle is offered at all, and a retired orphan still
+         * appears in no other list in the app — dropping it from this
+         * count would make it unreachable again, which is the precise
+         * bug this whole feature exists to fix.
+         *
+         * blockedCount is the ACTIONABLE subset: still active, and with
+         * no membership to fall back on, so genuinely unable to use the
+         * app. That is what drives the warning wording, so the alert
+         * clears once the accounts have been dealt with instead of
+         * nagging forever.
+         */
         const orphans = await User.findAll({
           where: { companyId: null },
-          attributes: ['id'],
+          attributes: ['id', 'isActive'],
           raw: true,
         })
         unassignedCount = orphans.length
 
-        if (orphans.length) {
+        const active = orphans.filter((o) => o.isActive)
+        if (active.length) {
           const withMembership = await UserCompany.findAll({
             where: {
-              userId: { [Op.in]: orphans.map((o) => o.id) },
+              userId: { [Op.in]: active.map((o) => o.id) },
               isActive: { [Op.ne]: false },
             },
             attributes: ['userId'],
             raw: true,
           })
           const rescued = new Set(withMembership.map((m) => String(m.userId)))
-          blockedCount = orphans.filter((o) => !rescued.has(String(o.id))).length
+          blockedCount = active.filter((o) => !rescued.has(String(o.id))).length
         }
       }
 

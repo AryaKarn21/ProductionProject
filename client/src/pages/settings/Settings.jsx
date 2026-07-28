@@ -554,16 +554,27 @@ function UsersTab() {
         accumulated silently and could not be assigned or removed.
       */}
       {(unassignedCount > 0 || showUnassigned) && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5">
+        <div
+          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border p-3.5 ${
+            blockedCount > 0
+              ? 'border-amber-500/30 bg-amber-500/5'
+              : 'border-slate-800 bg-slate-900/60'
+          }`}
+        >
           <div>
-            <p className="text-xs font-semibold text-amber-300">
-              {unassignedCount} account{unassignedCount === 1 ? '' : 's'} without a home company
-              {blockedCount > 0 && ` — ${blockedCount} of them cannot use the app at all`}
+            <p
+              className={`text-xs font-semibold ${
+                blockedCount > 0 ? 'text-amber-300' : 'text-slate-300'
+              }`}
+            >
+              {blockedCount > 0
+                ? `${blockedCount} account${blockedCount === 1 ? '' : 's'} cannot use the app`
+                : `${unassignedCount} retired account${unassignedCount === 1 ? '' : 's'} with no home company`}
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
               {blockedCount > 0
-                ? 'Accounts with no company and no membership can sign in but every request is rejected. Open one to assign it a company, or set its status to inactive if it is no longer needed.'
-                : 'These work through a company membership, but assigning a home company keeps their default tenant predictable.'}
+                ? 'These have no company and no membership, so they can sign in but every request is rejected. Open one to assign it a company, or set its status to inactive if it is no longer needed.'
+                : 'Already deactivated, so nothing needs doing. They appear in no other list, so this is the only way back to them if you ever need to restore one.'}
             </p>
           </div>
 
