@@ -102,18 +102,44 @@ const run = async () => {
   await sequelize.authenticate()
   console.log(`Connected to ${process.env.DB_NAME} at ${process.env.DB_HOST}\n`)
 
+  /*
+   * Both .sql and .js migrations, interleaved in filename order.
+   *
+   * Some corrections cannot be expressed in SQL. Role levels are the
+   * example: the granted permissions are not what is stored in the
+   * JSON column — normalizePermissions() expands legacy module grants
+   * ({users: true} -> every users.* action) and applies dependencies,
+   * so a role showing 22 raw keys actually grants 96 permissions while
+   * another showing 96 keys grants 11. Any SQL keyed on the raw JSON
+   * would rank those two backwards. A .js migration can import the
+   * real resolver and get it right.
+   */
   const files = fs
     .readdirSync(here)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => (f.endsWith('.sql') || f.endsWith('.js')) && f !== 'run.js')
     .sort()
 
   if (files.length === 0) {
-    console.log('No .sql migrations found.')
+    console.log('No migrations found.')
     return
   }
 
   for (const file of files) {
     console.log(`── ${file}`)
+
+    if (file.endsWith('.js')) {
+      // A .js migration exports a default async fn ({ sequelize }) and
+      // is responsible for its own idempotency, exactly like the SQL.
+      const mod = await import(new URL(file, import.meta.url).href)
+      if (typeof mod.default !== 'function') {
+        throw new Error(`${file} must export a default async function`)
+      }
+      const notes = (await mod.default({ sequelize })) || []
+      for (const note of [].concat(notes)) console.log(`   · ${note}`)
+      console.log(`   ✓ applied\n`)
+      continue
+    }
+
     const sql = fs.readFileSync(path.join(here, file), 'utf8')
     const statements = splitStatements(sql)
 
