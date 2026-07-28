@@ -101,7 +101,9 @@ router.post('/:id/replies', protect, async (req, res, next) => {
 
 router.delete('/:id', protect, async (req, res, next) => {
   try {
-    await Ticket.destroy({ where: { id: req.params.id } })
+    const ticket = await findInScope(req, Ticket, req.params.id)
+    if (!ticket) return res.status(404).json({ message: 'Ticket not found' })
+    await ticket.destroy()
     res.json({ message: 'Ticket deleted' })
   } catch (err) { next(err) }
 })

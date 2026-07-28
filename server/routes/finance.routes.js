@@ -236,7 +236,9 @@ router.patch("/expenses/:id", protect, async (req, res, next) => {
 // ── Expenses: delete ──────────────────────────────────────
 router.delete("/expenses/:id", protect, async (req, res, next) => {
   try {
-    await Expense.destroy({ where: { id: req.params.id } });
+    const expense = await findInScope(req, Expense, req.params.id);
+    if (!expense) return res.status(404).json({ message: "Expense not found" });
+    await expense.destroy();
     res.json({ message: "Expense deleted" });
   } catch (err) {
     next(err);

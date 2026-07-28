@@ -72,7 +72,11 @@ router.patch('/:id', protect, async (req, res, next) => {
 
 router.delete('/:id', protect, async (req, res, next) => {
   try {
-    await Project.destroy({ where: { id: req.params.id } })
+    // Was an unscoped destroy: it deleted the row whichever company
+    // owned it, and returned success either way.
+    const project = await findInScope(req, Project, req.params.id)
+    if (!project) return res.status(404).json({ message: 'Project not found' })
+    await project.destroy()
     res.json({ message: 'Project deleted' })
   } catch (err) { next(err) }
 })
@@ -109,7 +113,9 @@ router.patch('/tasks/:taskId', protect, async (req, res, next) => {
 
 router.delete('/tasks/:taskId', protect, async (req, res, next) => {
   try {
-    await Task.destroy({ where: { id: req.params.taskId } })
+    const task = await findInScope(req, Task, req.params.taskId)
+    if (!task) return res.status(404).json({ message: 'Task not found' })
+    await task.destroy()
     res.json({ message: 'Task deleted' })
   } catch (err) { next(err) }
 })
