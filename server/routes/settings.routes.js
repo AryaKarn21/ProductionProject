@@ -5,7 +5,7 @@ import { Company, User, UserCompany, Role, Employee } from '../models/index.js'
 import { authorize, authorizePermission, can } from '../middleware/auth.js'
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
-import { assertNoCycle, invalidateCompanyTree, getCompanyTree } from '../utils/companyTree.js'
+import { assertNoCycle, invalidateCompanyTree, getCompanyTree, getRoleScopeIds } from '../utils/companyTree.js'
 import { withoutAutoAudit } from '../middleware/requestContext.js'
 
 const router = express.Router()
@@ -129,7 +129,23 @@ const assertCanAssignRole = async (req, role) => {
 
   if (!role) return null
 
-  if (String(role.companyId) !== String(req.companyId)) {
+  /*
+   * A role may be owned by this company OR by any company above it in
+   * the group.
+   *
+   * Previously this demanded an exact companyId match, which broke the
+   * moment roles were defined once at the group parent and reused
+   * below — the situation on this deployment, where 12 of 17 users hold
+   * a role owned by a company other than their own. Those users' roles
+   * could not be reassigned at all: the guard rejected the very role
+   * they were already holding.
+   *
+   * Inheritance is upward only, so a sibling company's private roles
+   * stay unreachable, and the level check below still prevents anyone
+   * granting more authority than they hold themselves.
+   */
+  const allowedOwners = await getRoleScopeIds(req.companyId)
+  if (!allowedOwners.includes(String(role.companyId))) {
     return 'That role belongs to a different company.'
   }
 
@@ -584,7 +600,11 @@ router.post(
           await t.rollback()
           return res.status(400).json({ message: 'Selected role does not exist.' })
         }
-        if (String(assignedRole.companyId) !== String(targetCompanyId)) {
+        // Same group-inheritance rule as assertCanAssignRole(): the
+        // role may be owned by the target company or by any company
+        // above it, so a subsidiary can use the group's standard roles.
+        const roleOwners = await getRoleScopeIds(targetCompanyId)
+        if (!roleOwners.includes(String(assignedRole.companyId))) {
           await t.rollback()
           return res.status(400).json({
             message: 'That role belongs to a different company.',
@@ -1000,7 +1020,8 @@ router.put(
           await t.rollback()
           return res.status(400).json({ message: `Role ${m.roleId} does not exist.` })
         }
-        if (String(role.companyId) !== String(m.companyId)) {
+        const membershipRoleOwners = await getRoleScopeIds(m.companyId)
+        if (!membershipRoleOwners.includes(String(role.companyId))) {
           await t.rollback()
           return res.status(400).json({
             message: `Role "${role.name}" does not belong to the selected company.`,

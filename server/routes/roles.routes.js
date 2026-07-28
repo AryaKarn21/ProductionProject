@@ -5,6 +5,7 @@ import { authorize, authorizePermission, invalidateRoleCache } from '../middlewa
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
 import { ALL_PERMISSION_KEYS, normalizePermissions } from '../config/permissions.js'
+import { getRoleScopeIds } from '../utils/companyTree.js'
 
 const router = express.Router()
 
@@ -36,6 +37,33 @@ const pick = (source, allowed) =>
 const scopeWhere = (req, extra = {}) => {
   const where = { ...extra }
   if (req.companyId) where.companyId = req.companyId
+  return where
+}
+
+/*
+| readScopeWhere — the same thing, widened to INHERITED roles.
+|
+| Roles are defined once by the group parent (OS Group owns
+| Administrator, Manager, Accountant and Employee) and held by users
+| across every company beneath it — 12 of 17 users on this deployment
+| hold a role owned by a company other than their own.
+|
+| With the strict scope above, those roles were invisible from any
+| child company: the Roles screen listed only locally-owned roles, so
+| an admin could not see, let alone reassign, the role most of their
+| users actually held.
+|
+| Inheritance is strictly UPWARD — own company plus ancestors, never a
+| sibling — and this is used ONLY on read paths. Every mutating path
+| (update, delete, activate, restore, clone-source, bulk, name
+| uniqueness) deliberately keeps using scopeWhere(), so a subsidiary
+| can USE the group's roles but can never edit or delete them.
+*/
+const readScopeWhere = async (req, extra = {}) => {
+  const where = { ...extra }
+  if (req.companyId) {
+    where.companyId = { [Op.in]: await getRoleScopeIds(req.companyId) }
+  }
   return where
 }
 
@@ -139,7 +167,7 @@ router.get('/', authorizePermission('roles.view'), async (req, res, next) => {
     const { search = '', status, includeDeleted } = req.query
     const { page, limit, offset } = parsePagination(req)
 
-    const where = scopeWhere(req)
+    const where = await readScopeWhere(req)
     if (!includeDeleted || includeDeleted === 'false') where.isDeleted = false
     if (status === 'active') where.isActive = true
     if (status === 'inactive') where.isActive = false
@@ -177,7 +205,7 @@ router.get('/', authorizePermission('roles.view'), async (req, res, next) => {
 
 router.get('/stats', authorizePermission('roles.view'), async (req, res, next) => {
   try {
-    const where = scopeWhere(req)
+    const where = await readScopeWhere(req)
 
     const [total, active, inactive, deleted] = await Promise.all([
       Role.count({ where: { ...where, isDeleted: false } }),
@@ -228,7 +256,7 @@ router.get('/permission-catalog', authorizePermission('roles.view'), async (req,
 router.get('/:id', validateUuidParam('id'), authorizePermission('roles.view'), async (req, res, next) => {
   try {
     const role = await Role.findOne({
-      where: scopeWhere(req, { id: req.params.id }),
+      where: await readScopeWhere(req, { id: req.params.id }),
       include: [{ model: Role, as: 'parent', attributes: ['id', 'name'], required: false }],
     })
     if (!role) return res.status(404).json({ message: 'Role not found' })

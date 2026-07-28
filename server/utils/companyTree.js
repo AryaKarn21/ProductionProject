@@ -89,6 +89,51 @@ export const getScopeIds = async (rootId) => {
   return [String(rootId), ...(await getDescendantIds(rootId))]
 }
 
+/**
+ * Every company ABOVE this one, nearest parent first.
+ *
+ * The mirror of getDescendantIds(). Oversight looks downward; role
+ * inheritance looks upward — a role defined by the group parent should
+ * be usable by the companies beneath it, which is what lets OS Group
+ * define Administrator/Manager/Accountant/Employee once instead of
+ * every subsidiary redefining all four.
+ *
+ * Carries the same `seen` guard, so a corrupted parentId cycle
+ * terminates instead of looping forever.
+ */
+export const getAncestorIds = async (companyId) => {
+  if (!companyId) return []
+
+  const rows = await loadCompanies()
+  const byId = new Map(rows.map((r) => [String(r.id), r]))
+
+  const out = []
+  const seen = new Set([String(companyId)])
+  let current = byId.get(String(companyId))
+
+  while (current?.parentId) {
+    const parentId = String(current.parentId)
+    if (seen.has(parentId)) break
+    seen.add(parentId)
+    out.push(parentId)
+    current = byId.get(parentId)
+  }
+
+  return out
+}
+
+/**
+ * The companies whose roles this company may use: itself plus every
+ * ancestor.
+ *
+ * A child company inherits the group's standard roles, but cannot reach
+ * a SIBLING's private ones — inheritance is strictly upward.
+ */
+export const getRoleScopeIds = async (companyId) => {
+  if (!companyId) return []
+  return [String(companyId), ...(await getAncestorIds(companyId))]
+}
+
 /** True when this company has at least one child. */
 export const hasChildren = async (companyId) => {
   if (!companyId) return false
@@ -160,6 +205,8 @@ export const assertNoCycle = async (companyId, newParentId) => {
 
 export default {
   getDescendantIds,
+  getAncestorIds,
+  getRoleScopeIds,
   getScopeIds,
   getCompanyTree,
   getCompanyMap,
