@@ -1,6 +1,5 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import crypto from "crypto";
 import { Op } from "sequelize";
 
 import { sequelize } from "../config/db.js";
@@ -208,7 +207,9 @@ async function findOrCreateThread({
    * No existing conversation was found.
    * Create a new thread.
    */
-  const from = firstAddress(parsed.from);
+  // `const from = firstAddress(parsed.from)` was computed here and
+  // never read — the participant list below derives the sender
+  // itself via normalizeAddressList(parsed.from).
 
   const participants = [
     ...normalizeAddressList(parsed.from),

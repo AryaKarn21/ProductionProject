@@ -1,5 +1,5 @@
 import express from 'express'
-import { Op, fn, col } from 'sequelize'
+import { Op } from 'sequelize'
 import { protect } from '../middleware/auth.js'
 import { Lead, Account, Employee, Ticket, Opportunity, InventoryItem, Expense, User } from '../models/index.js'
 

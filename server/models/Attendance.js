@@ -16,14 +16,17 @@ Attendance.init(
       type: DataTypes.UUID,
       allowNull: true,
     },
-    hoursWorked: { type: DataTypes.FLOAT },
+    // `hoursWorked` and `date` were each declared twice here. The
+    // definitions were identical so nothing broke — JavaScript simply
+    // keeps the last one — but a duplicate key is how a real
+    // divergence hides, as it did on InventoryItem.code where the two
+    // copies disagreed and a unique constraint was silently dropped.
     date: { type: DataTypes.DATEONLY, allowNull: false },
     checkIn: { type: DataTypes.DATE },
     checkOut: { type: DataTypes.DATE },
 
     hoursWorked: { type: DataTypes.FLOAT },
     overtimeHours: { type: DataTypes.FLOAT, defaultValue: 0 },
-    date: { type: DataTypes.DATEONLY, allowNull: false },
     status: {
       type: DataTypes.ENUM("present", "absent", "late", "half_day", "holiday"),
       defaultValue: "present",

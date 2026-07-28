@@ -561,7 +561,7 @@ router.post(
         // Promotion audit
         // ------------------------------------------------------
 
-        if (Boolean(promotionEligible)) {
+        if (promotionEligible) {
           await logEvent({
             companyId,
 

@@ -718,7 +718,7 @@ router.post("/:id/send-email", protect, async (req, res, next) => {
         resourceId: employee.id,
         changes: { subject },
       });
-    } catch (_) {}
+    } catch { /* best-effort cleanup — failure is not fatal here */ }
 
     res.json({ message: "Email sent" });
   } catch (err) {

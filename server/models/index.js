@@ -41,7 +41,6 @@ import NotificationPreference from "./NotificationPreference.js";
 import DailyReport from "./DailyReport.js";
 // Email module — models + associations live in EmailModels.js
 import {
-  emailmodels,
   EmailAccount,
   EmailThread,
   Email,
