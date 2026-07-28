@@ -19,8 +19,7 @@ import {
   RotateCcw,
   Building2,
   Calendar as CalendarIcon,
-  Filter,
-} from "lucide-react";
+  } from "lucide-react";
 import { attendanceAPI } from "@/api/attendance.api";
 import { employeesAPI } from "@/api/employees.api";
 import { shiftsAPI } from "@/api/shifts.api";

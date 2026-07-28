@@ -64,6 +64,25 @@ function StatRow({ label, value, valueClass = "" }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// ── Save button ────────────────────────────────────────────────
+//
+// Module scope, not inside EmployeeEdit. A component declared in
+// another component's body is a new component TYPE on every render, so
+// React unmounts and remounts its subtree each time — which on a form
+// destroys and recreates the focused element mid-typing. `pending` is
+// now a prop rather than a closure over updateMutation.
+const SaveBtn = ({ label = "Save Changes", pending = false }) => (
+  <div className="md:col-span-2 flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700/60 mt-2">
+    <button
+      type="submit"
+      disabled={pending}
+      className="w-full md:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-sm font-semibold rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-60"
+    >
+      {pending ? "Saving…" : label}
+    </button>
+  </div>
+);
+
 export default function EmployeeEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -171,19 +190,6 @@ export default function EmployeeEdit() {
       </div>
     );
   }
-
-  // ── Save button ──────────────────────────────────────────────
-  const SaveBtn = ({ label = "Save Changes" }) => (
-    <div className="md:col-span-2 flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700/60 mt-2">
-      <button
-        type="submit"
-        disabled={updateMutation.isPending}
-        className="w-full md:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-sm font-semibold rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-60"
-      >
-        {updateMutation.isPending ? "Saving…" : label}
-      </button>
-    </div>
-  );
 
   // ════════════════════════════════════════════════════════════
   return (
@@ -330,7 +336,7 @@ export default function EmployeeEdit() {
                   </select>
                 </FormField>
 
-                <SaveBtn label="Save Changes" />
+                <SaveBtn pending={updateMutation.isPending} label="Save Changes" />
               </div>
             )}
 
@@ -412,7 +418,7 @@ export default function EmployeeEdit() {
                   />
                 </FormField>
 
-                <SaveBtn label="Save Salary Info" />
+                <SaveBtn pending={updateMutation.isPending} label="Save Salary Info" />
               </div>
             )}
 
@@ -458,7 +464,7 @@ export default function EmployeeEdit() {
                   <input type="text" className={inputCls} placeholder="Employee State Insurance ID" value={formData.esiNumber} onChange={set("esiNumber")} />
                 </FormField>
 
-                <SaveBtn label="Save Bank Details" />
+                <SaveBtn pending={updateMutation.isPending} label="Save Bank Details" />
               </div>
             )}
 

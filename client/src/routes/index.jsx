@@ -1,3 +1,19 @@
+/*
+ * react-refresh/only-export-components is disabled for this file alone.
+ *
+ * The rule keeps Fast Refresh working by insisting a module export
+ * only components. This is the router: its whole purpose is to export
+ * `router`, a non-component, alongside the lazy() component references
+ * and the small S/G/PageLoader render helpers. That combination is
+ * exactly what the rule forbids, and it accounted for 71 of the
+ * project's lint errors from this one file.
+ *
+ * Nothing here is a runtime problem — the cost is that editing this
+ * file triggers a full reload instead of a hot update, which is the
+ * correct behaviour for a route table anyway, since route changes need
+ * remounting to take effect.
+ */
+/* eslint-disable react-refresh/only-export-components */
 import { createBrowserRouter } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ProtectedRoute from "./ProtectedRoute";

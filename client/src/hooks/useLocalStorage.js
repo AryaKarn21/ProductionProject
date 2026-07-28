@@ -24,7 +24,7 @@ export function useLocalStorage(key, initialValue) {
     try {
       setStoredValue(initialValue)
       window.localStorage.removeItem(key)
-    } catch {}
+    } catch { /* storage unavailable (private mode, quota) — ignore */ }
   }
 
   return [storedValue, setValue, removeValue]

@@ -8,7 +8,9 @@ export function useAuth() {
   const navigate = useNavigate()
 
   const handleLogout = async () => {
-    try { await authAPI.logout() } catch {}
+    // A failed server-side logout must not strand the user in a
+    // half-signed-in state — clear the local session regardless.
+    try { await authAPI.logout() } catch { /* ignored on purpose */ }
     logout()
     navigate('/login')
     toast.success('Signed out successfully')
