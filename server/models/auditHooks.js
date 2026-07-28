@@ -399,4 +399,22 @@ const safeStringify = (value) => {
   }
 }
 
+/*
+ * Exported for tests only.
+ *
+ * These are the pure parts of the hook: what gets redacted, what gets
+ * ignored, and how a record is labelled. They decide whether a password
+ * hash ends up in audit_logs, so they are worth pinning down — but they
+ * are internal detail, and nothing outside tests should import them.
+ */
+export const __testing = {
+  describe,
+  buildUpdateDiff,
+  snapshot,
+  SENSITIVE_FIELDS,
+  IGNORED_FIELDS,
+  EXCLUDED_MODELS,
+  MODEL_MODULE,
+}
+
 export default { registerAuditHooks }
