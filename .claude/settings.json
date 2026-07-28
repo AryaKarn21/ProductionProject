@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 150 node -e ' *)",
+      "Bash(timeout 90 node -e ' *)"
+    ]
+  }
+}

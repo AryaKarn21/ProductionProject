@@ -638,6 +638,9 @@ function RolesTab() {
       permissions: {},
       companyId: '',
       parentRoleId: '',
+      // Matches the seeded Manager. Without a value the select renders
+      // blank and the role saves at level 0 again.
+      level: 60,
     },
   })
 
@@ -666,7 +669,7 @@ function RolesTab() {
 
   const openCreateModal = () => {
     setEditingRole(null)
-    reset({ name: '', description: '', permissions: {}, companyId: '', parentRoleId: '' })
+    reset({ name: '', description: '', permissions: {}, companyId: '', parentRoleId: '', level: 60 })
     setModalOpen(true)
   }
 
@@ -678,6 +681,7 @@ function RolesTab() {
       permissions: role.permissions || {},
       companyId: role.companyId || '',
       parentRoleId: role.parentRoleId || '',
+      level: role.level ?? 60,
     })
     setModalOpen(true)
   }

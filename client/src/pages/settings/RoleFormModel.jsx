@@ -20,6 +20,7 @@ import {
   Settings,
   Building2,
   GitBranch,
+  ShieldCheck,
 } from "lucide-react";
 
 const MODULE_ICONS = {
@@ -181,6 +182,39 @@ export default function RoleFormModal({
             </select>
             <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
               Everything the parent grants is inherited, plus whatever you tick below.
+            </p>
+          </div>
+
+          {/*
+            Authority level.
+
+            This field existed on the model and was enforced by both
+            escalation guards, but the form never sent it — so every role
+            created here was saved at the default level 0, the lowest
+            possible. Roles ended up holding 96 permissions (including
+            user management) while ranking below an Employee, which meant
+            the level check could never refuse to hand them out.
+
+            The server still caps this at the creator's own level, so
+            nobody can mint a role that outranks them.
+          */}
+          <div>
+            <label className="form-label">
+              <span className="inline-flex items-center gap-1">
+                <ShieldCheck size={13} /> Authority Level
+              </span>
+            </label>
+            <select className="input" {...register("level")}>
+              <option value="10">10 — Staff (self-service only)</option>
+              <option value="30">30 — Senior staff</option>
+              <option value="50">50 — Specialist (finance, HR)</option>
+              <option value="60">60 — Manager</option>
+              <option value="70">70 — Senior manager</option>
+              <option value="90">90 — Administrator</option>
+            </select>
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Controls who may assign this role: only someone at this level or
+              above. Set it to match how much the role actually grants.
             </p>
           </div>
         </div>

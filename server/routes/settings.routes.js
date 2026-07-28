@@ -5,6 +5,7 @@ import { Company, User, UserCompany, Role, Employee } from '../models/index.js'
 import { authorize, authorizePermission, can } from '../middleware/auth.js'
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
+import { normalizePermissions } from '../config/permissions.js'
 import { assertNoCycle, invalidateCompanyTree, getCompanyTree, getRoleScopeIds } from '../utils/companyTree.js'
 import { withoutAutoAudit } from '../middleware/requestContext.js'
 
@@ -156,6 +157,37 @@ const assertCanAssignRole = async (req, role) => {
   const myLevel = req.user.roleInfo?.level ?? 0
   if ((role.level ?? 0) > myLevel) {
     return 'You cannot assign a role with more authority than your own.'
+  }
+
+  /*
+   * You cannot hand out access you do not have yourself.
+   *
+   * The level check above was the ONLY guard, and it is easy to defeat
+   * without meaning to: RoleFormModel.jsx never sent a `level`, and
+   * Role.level defaults to 0, so every role created through the UI
+   * carried level 0. Five roles on this deployment ended up holding 96
+   * permissions — including users.manage and roles.create — at level 0.
+   * Since `0 > 0` is false, anyone holding one of them could assign
+   * that same near-admin access to anybody, themselves included.
+   *
+   * This is not new policy: assertNoEscalation() in roles.routes.js
+   * already applies exactly this rule when a role is CREATED or EDITED.
+   * Applying it on ASSIGNMENT too closes the gap between the two, and
+   * it keeps working even if `level` is never maintained.
+   *
+   * It can only ever deny — it grants nothing that was previously
+   * refused. Super admin is exempt, as everywhere else.
+   */
+  const mine = req.permissionSet || new Set()
+  const granting = normalizePermissions(role.permissions)
+  const excess = [...granting].filter((key) => !mine.has(key))
+
+  if (excess.length) {
+    return (
+      'You cannot assign a role that grants permissions you do not hold ' +
+      `yourself: ${excess.slice(0, 5).join(', ')}` +
+      (excess.length > 5 ? ` and ${excess.length - 5} more` : '')
+    )
   }
 
   return null
