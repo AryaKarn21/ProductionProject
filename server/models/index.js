@@ -545,6 +545,16 @@ const allModels = [
 ];
 allModels.forEach(withMongoCompatJSON);
 
+// Every create/update/delete on a business model now writes an audit row
+// automatically. Registered last, after all models and associations
+// exist, so the hooks see the finished registry.
+//
+// This is what gives the parent company visibility into its child
+// companies: previously only 9 of 28 route files logged anything, so
+// most of what a child company did left no record at all.
+import { registerAuditHooks } from "./auditHooks.js";
+registerAuditHooks();
+
 export {
   Company,
   User,

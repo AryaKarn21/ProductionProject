@@ -5,6 +5,8 @@ import { Company, User, UserCompany, Role, Employee } from '../models/index.js'
 import { authorize, authorizePermission, can } from '../middleware/auth.js'
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
+import { assertNoCycle, invalidateCompanyTree, getCompanyTree } from '../utils/companyTree.js'
+import { withoutAutoAudit } from '../middleware/requestContext.js'
 
 const router = express.Router()
 
@@ -27,10 +29,40 @@ const USER_WRITABLE_FIELDS = ['name', 'email', 'phone', 'avatar', 'isActive', 's
 // The earlier version listed city/country/taxId (which the model does
 // not have) and omitted industry/type (which it does), so the Industry
 // field on the Add Company form was silently discarded.
+//
+// `parentId` is deliberately NOT in this list: it is the group hierarchy
+// and is applied separately, below, after a cycle check. Letting it
+// through `pick()` would allow a body to reparent a company with no
+// validation at all.
 const COMPANY_WRITABLE_FIELDS = [
   'name', 'type', 'industry', 'website', 'email', 'phone',
   'address', 'currency', 'timezone', 'logo', 'isActive',
 ]
+
+/**
+ * Validates and applies a parent-company assignment.
+ *
+ * Returns an error message, or null when `company.parentId` has been set
+ * (not yet saved). Pass `undefined` to leave the current parent alone;
+ * pass null to promote the company to a top-level root.
+ */
+const applyParent = async (company, parentId) => {
+  if (parentId === undefined) return null
+
+  if (parentId === null || parentId === '') {
+    company.parentId = null
+    return null
+  }
+
+  const parent = await Company.findByPk(parentId)
+  if (!parent) return 'The selected parent company does not exist.'
+
+  const cycle = await assertNoCycle(company.id, parentId)
+  if (cycle) return cycle
+
+  company.parentId = parent.id
+  return null
+}
 
 const pick = (source, allowed) =>
   allowed.reduce((acc, key) => {
@@ -142,10 +174,37 @@ router.get(
 
       const companies = await Company.findAll({
         where,
+        // The company list drives the parent-company picker and the
+        // Group Console hierarchy, both of which need to know each
+        // company's parent — previously the association existed but was
+        // never included, so the client could not see the tree.
+        include: [{ model: Company, as: 'parent', attributes: ['id', 'name'] }],
         order: [['name', 'ASC']],
       })
 
       res.json(companies)
+    } catch (err) {
+      next(err)
+    }
+  }
+)
+
+/**
+ * GET /api/settings/companies/tree
+ *
+ * The org chart: every company nested under its parent. Used by the
+ * Group Console and by the parent-company picker to prevent a user
+ * selecting a parent that would create a loop.
+ */
+router.get(
+  '/companies/tree',
+  authorize('super_admin', 'admin', 'manager'),
+  async (req, res, next) => {
+    try {
+      // A non-super-admin only ever sees the subtree rooted at their own
+      // company, never the whole platform.
+      const rootId = req.user.role === 'super_admin' ? null : req.companyId
+      res.json(await getCompanyTree(rootId))
     } catch (err) {
       next(err)
     }
@@ -166,35 +225,54 @@ router.post(
     currency: rules.string({ max: 10 }),
     timezone: rules.string({ max: 60 }),
     logo: rules.string({ max: 500 }),
+    parentId: rules.uuid({ nullable: true }),
   }),
   async (req, res, next) => {
     const t = await sequelize.transaction()
     try {
-      // Whitelisted — a caller can no longer set `id`, `parentId` or
-      // `isActive` by slipping them into the body.
-      const company = await Company.create(pick(req.body, COMPANY_WRITABLE_FIELDS), {
-        transaction: t,
-      })
+      // Whitelisted — a caller can no longer set `id` or `isActive` by
+      // slipping them into the body. parentId is handled separately so
+      // it goes through the existence + cycle check.
+      const { parentId } = req.body
 
-      await UserCompany.create(
-        {
-          userId: req.user.id,
-          companyId: company.id,
-          isPrimary: false,
-          assignedById: req.user.id,
-        },
-        { transaction: t }
+      if (parentId) {
+        const parent = await Company.findByPk(parentId, { transaction: t })
+        if (!parent) {
+          await t.rollback()
+          return res.status(400).json({ message: 'The selected parent company does not exist.' })
+        }
+      }
+
+      const company = await withoutAutoAudit(() =>
+        Company.create(
+          { ...pick(req.body, COMPANY_WRITABLE_FIELDS), parentId: parentId || null },
+          { transaction: t }
+        )
+      )
+
+      await withoutAutoAudit(() =>
+        UserCompany.create(
+          {
+            userId: req.user.id,
+            companyId: company.id,
+            isPrimary: false,
+            assignedById: req.user.id,
+          },
+          { transaction: t }
+        )
       )
 
       await t.commit()
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: company.id,
         action: 'company_created',
         resource: 'Company',
         resourceId: company.id,
+        resourceLabel: company.name,
         module: 'settings',
-        changes: { after: { name: company.name } },
+        changes: { after: { name: company.name, parentId: company.parentId } },
       })
 
       res.status(201).json(company)
@@ -220,13 +298,29 @@ router.patch(
       }
 
       const before = company.toJSON()
-      await company.update(pick(req.body, COMPANY_WRITABLE_FIELDS))
+
+      // Reparenting is restricted to super admin: moving a company
+      // between branches of the group changes who can see its data.
+      if (req.body.parentId !== undefined) {
+        if (req.user.role !== 'super_admin') {
+          return res.status(403).json({
+            message: 'Only a super admin can change a company\'s parent.',
+          })
+        }
+        const problem = await applyParent(company, req.body.parentId)
+        if (problem) return res.status(400).json({ message: problem })
+      }
+
+      Object.assign(company, pick(req.body, COMPANY_WRITABLE_FIELDS))
+      await withoutAutoAudit(() => company.save())
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: company.id,
         action: 'company_updated',
         resource: 'Company',
         resourceId: company.id,
+        resourceLabel: company.name,
         module: 'settings',
         changes: diffChanges(before, company.toJSON()),
       })
@@ -272,15 +366,29 @@ router.delete(
         })
       }
 
+      // Same reasoning as the user and role checks above, for the group
+      // hierarchy: deleting a parent left its children pointing at a
+      // parentId that no longer existed, which silently detached that
+      // whole branch from the Group Console.
+      const childCount = await Company.count({ where: { parentId: company.id } })
+      if (childCount > 0) {
+        await t.rollback()
+        return res.status(409).json({
+          message: `Cannot delete: ${childCount} company/companies sit under this one. Reassign or remove them first.`,
+        })
+      }
+
       await UserCompany.destroy({ where: { companyId: company.id }, transaction: t })
-      await company.destroy({ transaction: t })
+      await withoutAutoAudit(() => company.destroy({ transaction: t }))
       await t.commit()
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: null,
         action: 'company_deleted',
         resource: 'Company',
         resourceId: req.params.id,
+        resourceLabel: company.name,
         module: 'settings',
         changes: { before: { name: company.name } },
       })

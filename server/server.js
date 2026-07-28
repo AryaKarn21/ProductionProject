@@ -31,9 +31,11 @@ import reportsRoutes from "./routes/reports.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import rolesRoutes from "./routes/roles.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import groupRoutes from "./routes/group.routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
 import { resolveCompany } from "./middleware/tenant.js";
+import { requestContext } from "./middleware/requestContext.js";
 import meetingsRoutes from "./routes/meetings.routes.js";
 import meetingAttendeeRoutes from "./routes/meetingAttendees.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -218,43 +220,61 @@ app.use(
   })
 );
 
+/*
+|--------------------------------------------------------------------------
+| Tenant chain
+|--------------------------------------------------------------------------
+| Every protected router runs the same three middlewares, in this order:
+|
+|   protect         who is calling (JWT -> req.user, req.memberships)
+|   resolveCompany  which tenant they may touch (-> req.companyId)
+|   requestContext  publishes both into AsyncLocalStorage, so the audit
+|                   hooks in models/auditHooks.js can attribute every
+|                   write to a user and a company without each route
+|                   having to pass `req` down to the model layer.
+|
+| requestContext MUST come after resolveCompany: before it runs,
+| req.companyId does not exist yet and audit rows would be stamped with
+| the user's home company instead of the one they are working in.
+*/
+const tenantChain = [protect, resolveCompany, requestContext];
+
 app.use("/api/auth", authRoutes);
 
-app.use("/api/meetings", protect, resolveCompany, meetingsRoutes);
-app.use("/api/meeting-attendees", protect, resolveCompany, meetingAttendeeRoutes);
+app.use("/api/meetings", ...tenantChain,meetingsRoutes);
+app.use("/api/meeting-attendees", ...tenantChain,meetingAttendeeRoutes);
 
-app.use("/api/leads", protect, resolveCompany, leadsRoutes);
-app.use("/api/accounts", protect, resolveCompany, accountsRoutes);
-app.use("/api/contacts", protect, resolveCompany, contactsRoutes);
-app.use("/api/opportunities", protect, resolveCompany, opportunitiesRoutes);
-app.use("/api/dashboard", protect, resolveCompany, dashboardRoutes);
-app.use("/api/employees", protect, resolveCompany, employeesRoutes);
-app.use("/api/performance", protect, resolveCompany, performanceRoutes);
-app.use("/api/users", protect, resolveCompany, usersRoutes);
-app.use("/api/attendance", protect, resolveCompany, attendanceRoutes);
-app.use("/api/shifts", protect, resolveCompany, shiftRoutes);
-app.use("/api/leaves", protect, resolveCompany, leavesRoutes);
-app.use(
-  "/api/holidays",
-  protect,
-  resolveCompany,
-  holidayRoutes
-);
-app.use("/api/payroll", protect, resolveCompany, payrollRoutes);
-app.use("/api/finance", protect, resolveCompany, financeRoutes);
-app.use("/api/inventory", protect, resolveCompany, inventoryRoutes);
-app.use("/api/procurement", protect, resolveCompany, procurementRoutes);
-app.use("/api/projects", protect, resolveCompany, projectsRoutes);
-app.use("/api/support", protect, resolveCompany, supportRoutes);
-app.use("/api/reports", protect, resolveCompany, reportsRoutes);
-app.use("/api/notifications", protect, resolveCompany, notificationsRoutes);
+app.use("/api/leads", ...tenantChain,leadsRoutes);
+app.use("/api/accounts", ...tenantChain,accountsRoutes);
+app.use("/api/contacts", ...tenantChain,contactsRoutes);
+app.use("/api/opportunities", ...tenantChain,opportunitiesRoutes);
+app.use("/api/dashboard", ...tenantChain,dashboardRoutes);
+app.use("/api/employees", ...tenantChain,employeesRoutes);
+app.use("/api/performance", ...tenantChain,performanceRoutes);
+app.use("/api/users", ...tenantChain,usersRoutes);
+app.use("/api/attendance", ...tenantChain,attendanceRoutes);
+app.use("/api/shifts", ...tenantChain,shiftRoutes);
+app.use("/api/leaves", ...tenantChain,leavesRoutes);
+app.use("/api/holidays", ...tenantChain, holidayRoutes);
+app.use("/api/payroll", ...tenantChain,payrollRoutes);
+app.use("/api/finance", ...tenantChain,financeRoutes);
+app.use("/api/inventory", ...tenantChain,inventoryRoutes);
+app.use("/api/procurement", ...tenantChain,procurementRoutes);
+app.use("/api/projects", ...tenantChain,projectsRoutes);
+app.use("/api/support", ...tenantChain,supportRoutes);
+app.use("/api/reports", ...tenantChain,reportsRoutes);
+app.use("/api/notifications", ...tenantChain,notificationsRoutes);
 
 // SECURITY: resolveCompany was missing here, which is why every user
 // endpoint under /api/settings ran with no tenant scope at all.
-app.use("/api/settings", protect, resolveCompany, settingsRoutes);
+app.use("/api/settings", ...tenantChain,settingsRoutes);
 
-app.use("/api/roles", protect, resolveCompany, rolesRoutes);
-app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
+app.use("/api/roles", ...tenantChain,rolesRoutes);
+app.use("/api/audit-logs", ...tenantChain,auditRoutes);
+
+// Parent-company oversight: read-only visibility across every company
+// below the caller's own in the hierarchy. Scoped by middleware/groupScope.js.
+app.use("/api/group", ...tenantChain, groupRoutes);
 
 // Google OAuth for Gmail. Mounted BEFORE the protected email router: it
 // applies `protect` per-route so the /google/callback redirect from Google
@@ -262,7 +282,7 @@ app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
 // the signed `state` instead. All other /api/email/* paths fall through to
 // the protected emailRoutes below.
 app.use("/api/email", googleAuthRoutes);
-app.use("/api/email", protect, resolveCompany, emailRoutes);
+app.use("/api/email", ...tenantChain,emailRoutes);
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api", notFoundHandler);
@@ -272,28 +292,34 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
-    // TEMPORARY — remove this block after confirming DB connectivity
-    // with Hostinger. It just prints the app's real outbound IP so we
-    // can give Hostinger the exact address to check/whitelist.
-    try {
-      const ipRes = await fetch("https://api.ipify.org?format=json");
-      const ipData = await ipRes.json();
-      console.log("OUTBOUND IP (give this to Hostinger):", ipData.ip);
-    } catch (ipErr) {
-      console.log("Could not determine outbound IP:", ipErr.message);
-    }
-
-    console.log("DB_HOST:", process.env.DB_HOST);
-    console.log("DB_PORT:", process.env.DB_PORT);
-    console.log("DB_NAME:", process.env.DB_NAME);
-    console.log("DB_USER:", process.env.DB_USER);
+    console.log(`DB: ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}/${process.env.DB_NAME}`);
 
     await sequelize.authenticate();
     console.log("MySQL connected");
 
-    const alter = process.env.DB_SYNC_ALTER === "true";
-    console.log("Skipping sync");
-    console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
+    /*
+     * Schema sync.
+     *
+     * This block previously read DB_SYNC_ALTER into `alter`, logged
+     * "Skipping sync", then logged "Database synced" anyway — and never
+     * called sequelize.sync() at all. So the log said the schema was up
+     * to date while nothing had touched it, and any newly added column
+     * or table silently did not exist until someone ran the SQL by hand.
+     *
+     * Now it does what it says. Sync stays OFF by default because
+     * alter-ing a live production schema on boot is dangerous; run the
+     * checked-in migration instead (see migrations/), or set
+     * DB_SYNC_ALTER=true in development to let Sequelize do it.
+     */
+    if (process.env.DB_SYNC_ALTER === "true") {
+      await sequelize.sync({ alter: true });
+      console.log("Database synced (ALTER applied)");
+    } else {
+      console.log(
+        "Schema sync skipped (DB_SYNC_ALTER is not 'true'). " +
+        "Apply pending changes with migrations/ if the app reports missing columns."
+      );
+    }
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

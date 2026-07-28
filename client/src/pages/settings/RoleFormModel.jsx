@@ -200,7 +200,7 @@ export default function RoleFormModal({
           <PermissionGroup
             key={mod.key}
             title={mod.title}
-            icon={MODULE_ICONS[mod.key]}
+            icon={MODULE_ICONS[mod.iconKey]}
             permissions={mod.permissions.map((p) => p.key)}
             labels={Object.fromEntries(mod.permissions.map((p) => [p.key, p.label]))}
             register={register}

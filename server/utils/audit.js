@@ -28,6 +28,10 @@ export const logEvent = async ({
   status = 'success',
   userAgent = null,
   sessionId = null,
+  // Human-readable name of the affected record, so the Group Console
+  // activity feed can show "Lead — Acme Trading" rather than a UUID that
+  // may no longer resolve to anything.
+  resourceLabel = null,
 }) => {
   try {
     return await AuditLog.create({
@@ -36,6 +40,10 @@ export const logEvent = async ({
       action,
       resource,
       resourceId: resourceId != null ? String(resourceId) : null,
+      resourceLabel: resourceLabel ? String(resourceLabel).slice(0, 255) : null,
+      // Marks this as a hand-written entry rather than one produced by
+      // the global hooks in models/auditHooks.js.
+      source: 'route',
       changes,
       ipAddress,
       module,

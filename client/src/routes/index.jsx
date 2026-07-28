@@ -91,6 +91,13 @@ const TicketsList = lazy(() => import("@/pages/support/TicketsList"));
 const SupportEdit = lazy(() => import("@/pages/support/SupportEdit"));
 const SupportDetail = lazy(() => import("@/pages/support/SupportDetail"));
 const Analytics = lazy(() => import("@/pages/reports/Analytics"));
+
+// ── Group Console ────────────────────────────────────────────
+// Parent-company oversight of every company below it in the hierarchy.
+const GroupOverview = lazy(() => import("@/pages/group/GroupOverview"));
+const GroupActivity = lazy(() => import("@/pages/group/GroupActivity"));
+const GroupCompanies = lazy(() => import("@/pages/group/GroupCompanies"));
+const GroupCompanyDetail = lazy(() => import("@/pages/group/GroupCompanyDetail"));
 const Settings = lazy(() => import("@/pages/settings/Settings"));
 const UserDetails = lazy(() => import("@/pages/settings/users/UserDetails"));
 const UserEdit = lazy(() => import("@/pages/settings/users/UserEdit"));
@@ -416,6 +423,28 @@ export const router = createBrowserRouter([
           {
             path: "/reports",
             element: G("analytics.view", <Analytics />),
+          },
+
+          // ── Group Console ─────────────────────────────────
+          // Read-only oversight for a parent company over every
+          // company beneath it. Scoping is enforced server-side by
+          // middleware/groupScope.js; group.view only controls whether
+          // the screens are reachable at all.
+          {
+            path: "/group",
+            element: G("group.view", <GroupOverview />),
+          },
+          {
+            path: "/group/activity",
+            element: G("group.view", <GroupActivity />),
+          },
+          {
+            path: "/group/structure",
+            element: G("group.view", <GroupCompanies />),
+          },
+          {
+            path: "/group/companies/:id",
+            element: G("group.view", <GroupCompanyDetail />),
           },
 
           // ── Email ─────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { 
   Plus, 
   Building2, 
@@ -11,7 +11,7 @@ import {
   Download, 
   X
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { settingsAPI } from '@/api/settings.api'
 import { rolesAPI } from '@/api/roles.api'
 import { authAPI } from '@/api/auth.api'
@@ -19,6 +19,7 @@ import { useAuthStore } from '@/store/auth.store'
 import { useForm } from 'react-hook-form'
 import { formatDate } from '@/lib/utils'
 import DataTable from '@/components/shared/DataTable'
+import Pagination from '@/components/ui/Pagination'
 import Badge from '@/components/ui/Badge'
 import Avatar from '@/components/ui/Avatar'
 import RoleFormModal from './RoleFormModel'
@@ -39,7 +40,24 @@ const TABS = [
 ]
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState('company')
+  /*
+   * The active tab lives in the URL (?tab=audit) rather than in local
+   * state. Three things this fixes: the tabs are now linkable — which is
+   * what lets "View Full Activity Log" on the profile page point
+   * straight at the audit log — they survive a refresh, and the browser
+   * back button steps between them instead of leaving the page.
+   *
+   * An unknown or absent ?tab falls back to 'company', so existing
+   * /settings links keep landing exactly where they used to.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('tab')
+  const activeTab = TABS.some((t) => t.key === requested) ? requested : 'company'
+
+  const setActiveTab = (key) =>
+    // replace, not push: clicking through four tabs should not put four
+    // entries in the history stack for the user to back out through.
+    setSearchParams(key === 'company' ? {} : { tab: key }, { replace: true })
 
   return (
     <div className="space-y-6 p-4 sm:p-6 max-w-[1600px] mx-auto w-full animate-fade-in">
@@ -84,24 +102,33 @@ export default function Settings() {
   )
 }
 
+// ── Reusable field wrapper — avoids repeating label + input markup ──
+//
+// Declared at module scope, not inside CompanyTab. When a component is
+// defined in the body of another component it is a BRAND NEW component
+// type on every render, so React unmounts and remounts its whole subtree
+// each time — which in a form means the input you are typing in is
+// destroyed and recreated, losing focus and the caret position.
+const FormField = ({ label, children }) => (
+  <div className="space-y-1">
+    <label className="font-semibold text-slate-300">{label}</label>
+    {children}
+  </div>
+)
+
+const inputCls =
+  "w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
+
 function CompanyTab() {
   const queryClient = useQueryClient()
   const [showDialog, setShowDialog] = useState(false)
   const [editingCompany, setEditingCompany] = useState(null)
   const { refreshCompanies } = useAuthStore()
 
-  // ── Reusable field wrapper — avoids repeating label + input markup ──
-  const FormField = ({ label, children }) => (
-    <div className="space-y-1">
-      <label className="font-semibold text-slate-300">{label}</label>
-      {children}
-    </div>
-  )
-  const inputCls = "w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
-
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: {
       name: '',
+      type: '',
       industry: '',
       website: '',
       email: '',
@@ -109,6 +136,7 @@ function CompanyTab() {
       address: '',
       currency: 'NPR',
       timezone: 'Asia/Kathmandu',
+      parentId: '',
     },
   })
 
@@ -116,6 +144,7 @@ function CompanyTab() {
     if (editingCompany) {
       reset({
         name: editingCompany.name || '',
+        type: editingCompany.type || '',
         industry: editingCompany.industry || '',
         website: editingCompany.website || '',
         email: editingCompany.email || '',
@@ -123,6 +152,7 @@ function CompanyTab() {
         address: editingCompany.address || '',
         currency: editingCompany.currency || 'NPR',
         timezone: editingCompany.timezone || 'Asia/Kathmandu',
+        parentId: editingCompany.parentId || '',
       })
     }
   }, [editingCompany, reset])
@@ -168,9 +198,22 @@ function CompanyTab() {
   })
 
   const onSubmit = (data) => {
-    if (editingCompany) updateMutation.mutate({ id: editingCompany.id, data })
-    else createMutation.mutate(data)
+    // An empty <select> value is "", which the server's uuid rule would
+    // reject. Send null to mean "no parent — this is a top-level company".
+    const payload = { ...data, parentId: data.parentId || null }
+    if (editingCompany) updateMutation.mutate({ id: editingCompany.id, data: payload })
+    else createMutation.mutate(payload)
   }
+
+  /*
+   * Candidates for the parent-company picker.
+   *
+   * Excludes the company being edited: a company cannot be its own
+   * parent. Deeper loops (A -> B -> A) are caught server-side by
+   * assertNoCycle() in utils/companyTree.js, since the client does not
+   * hold the full descendant list.
+   */
+  const parentOptions = companies.filter((c) => c.id !== editingCompany?.id)
 
   if (isLoading) {
     return <div className="h-48 rounded-xl bg-slate-900/50 animate-pulse border border-slate-800" />
@@ -202,6 +245,7 @@ function CompanyTab() {
             <thead className="bg-slate-950/80 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <tr>
                 <th className="p-3.5">Company Name</th>
+                <th className="p-3.5">Parent Company</th>
                 <th className="p-3.5">Industry</th>
                 <th className="p-3.5">Contact Email</th>
                 <th className="p-3.5">Phone Number</th>
@@ -211,7 +255,7 @@ function CompanyTab() {
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {companies.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-10 text-slate-500">
+                  <td colSpan={6} className="text-center py-10 text-slate-500">
                     No registered companies found
                   </td>
                 </tr>
@@ -219,6 +263,11 @@ function CompanyTab() {
                 companies.map((company) => (
                   <tr key={company.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="p-3.5 font-semibold text-slate-200">{company.name}</td>
+                    <td className="p-3.5 text-slate-400">
+                      {company.parent?.name || (
+                        <span className="text-slate-600">Top level</span>
+                      )}
+                    </td>
                     <td className="p-3.5 text-slate-400">{company.industry || '—'}</td>
                     <td className="p-3.5 text-slate-400">{company.email || '—'}</td>
                     <td className="p-3.5 text-slate-400">{company.phone || '—'}</td>
@@ -321,6 +370,37 @@ function CompanyTab() {
                   placeholder="Headquarters physical address..."
                 />
               </FormField>
+
+              {/*
+                Group hierarchy. companies.parentId has existed in the
+                schema since the MySQL migration, and index.js has always
+                declared the parent/children association — but no screen
+                ever set it, so every company was a disconnected root and
+                the parent company could not see anything.
+              */}
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Parent Company">
+                  <select {...register('parentId')} className={inputCls}>
+                    <option value="">None — top-level company</option>
+                    {parentOptions.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Its parent sees this company in the Group Console.
+                  </p>
+                </FormField>
+
+                <FormField label="Company Type">
+                  <input
+                    {...register('type')}
+                    className={inputCls}
+                    placeholder="e.g. Subsidiary"
+                  />
+                </FormField>
+              </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
@@ -600,7 +680,10 @@ function RolesTab() {
 function AuditTab() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [page] = useState(1)
+  // `page` had no setter, so the audit log was permanently frozen on
+  // page 1 and only the 20 most recent events were ever reachable.
+  const [page, setPage] = useState(1)
+  const [exporting, setExporting] = useState(false)
   const limit = 20
 
   useEffect(() => {
@@ -608,14 +691,50 @@ function AuditTab() {
     return () => clearTimeout(timer)
   }, [search])
 
+  // A new search must restart at page 1, or a search run from page 5
+  // lands on an offset the filtered result set does not reach. Done in
+  // the input's own handler rather than an effect on [debouncedSearch],
+  // which would first render — and fetch — with the new filter and the
+  // stale page number.
+  const onSearchChange = (value) => {
+    setSearch(value)
+    setPage(1)
+  }
+
   const queryParams = { page, limit, search: debouncedSearch || undefined }
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit-logs', queryParams],
     queryFn: () => settingsAPI.getAuditLogs(queryParams).then((r) => r.data),
+    placeholderData: keepPreviousData,
   })
 
   const logs = data?.logs || []
+  const total = data?.total || 0
+
+  // The Export CSV button had no onClick at all: settingsAPI.exportAuditLogs
+  // already existed but nothing called it, so the button was decorative.
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await settingsAPI.exportAuditLogs({
+        search: debouncedSearch || undefined,
+      })
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Audit log exported')
+    } catch {
+      // The axios interceptor has already shown the reason.
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -625,12 +744,17 @@ function AuditTab() {
       <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between">
         <input
           className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none max-w-sm w-full"
-          placeholder="Filter audit actions or resources..."
+          placeholder="Filter audit actions, records or resources..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => onSearchChange(e.target.value)}
         />
-        <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
-          <Download size={14} className="text-slate-400" /> Export CSV
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 transition-colors"
+        >
+          <Download size={14} className="text-slate-400" />
+          {exporting ? 'Exporting…' : 'Export CSV'}
         </button>
       </div>
 
@@ -647,6 +771,8 @@ function AuditTab() {
           logs.map((log) => <AuditLogRow key={log.id} log={log} />)
         )}
       </div>
+
+      <Pagination page={page} pageSize={limit} total={total} onChange={setPage} />
     </div>
   )
 }

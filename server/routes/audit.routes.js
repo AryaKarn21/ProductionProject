@@ -1,9 +1,28 @@
 import express from 'express'
 import { Op } from 'sequelize'
 import { AuditLog, User } from '../models/index.js'
-import { protect, authorize } from '../middleware/auth.js'
+import { protect, can } from '../middleware/auth.js'
 
 const router = express.Router()
+
+/*
+| config/permissions.js has always defined 'auditlog.view' and
+| 'auditlog.export', and the permission matrix has always offered them —
+| but these routes only ever checked the legacy `role` ENUM, so granting
+| either key did nothing and no non-admin could reach the audit log
+| however their role was configured.
+|
+| This honours the permission AND keeps the existing role check, so no
+| account that can read the audit log today loses access.
+*/
+const requireAudit = (permission) => (req, res, next) => {
+  if (req.user?.role === 'super_admin' || req.user?.role === 'admin') return next()
+  if (can(req, permission)) return next()
+  return res.status(403).json({
+    message: 'You do not have permission to view the audit log.',
+    required: permission,
+  })
+}
 
 const csvEscape = (v) => {
   if (v == null) return ''
@@ -27,6 +46,10 @@ function buildWhere(req) {
       { action: { [Op.like]: `%${search}%` } },
       { resource: { [Op.like]: `%${search}%` } },
       { resourceId: { [Op.like]: `%${search}%` } },
+      // Searching by the record's NAME is what an operator actually
+      // wants ("find everything that touched Acme Trading"); before
+      // resourceLabel existed they could only search by UUID.
+      { resourceLabel: { [Op.like]: `%${search}%` } },
     ]
   }
 
@@ -41,7 +64,7 @@ function buildWhere(req) {
 
 
 // ── List (filters + pagination) ──
-router.get('/', protect, authorize('super_admin', 'admin'), async (req, res, next) => {
+router.get('/', protect, requireAudit('auditlog.view'), async (req, res, next) => {
   try {
     const { page = 1, limit = 20 } = req.query
     const where = buildWhere(req)
@@ -61,7 +84,7 @@ router.get('/', protect, authorize('super_admin', 'admin'), async (req, res, nex
 })
 
 // ── Stats (for the Audit Log dashboard) ──
-router.get('/stats', protect, authorize('super_admin', 'admin'), async (req, res, next) => {
+router.get('/stats', protect, requireAudit('auditlog.view'), async (req, res, next) => {
   try {
     const where = {}
     if (req.companyId) where.companyId = req.companyId
@@ -90,7 +113,7 @@ router.get('/stats', protect, authorize('super_admin', 'admin'), async (req, res
 })
 
 // ── CSV export (matches the zero-dependency CSV pattern used elsewhere in the app) ──
-router.get('/export', protect, authorize('super_admin', 'admin'), async (req, res, next) => {
+router.get('/export', protect, requireAudit('auditlog.export'), async (req, res, next) => {
   try {
     const where = buildWhere(req)
 
@@ -101,7 +124,7 @@ router.get('/export', protect, authorize('super_admin', 'admin'), async (req, re
       limit: 5000, // sane upper bound for a single export
     })
 
-    const headers = ['Timestamp', 'User', 'Email', 'Action', 'Module', 'Resource', 'Resource ID', 'Status', 'IP Address', 'Device', 'Browser']
+    const headers = ['Timestamp', 'User', 'Email', 'Action', 'Module', 'Resource', 'Record', 'Resource ID', 'Status', 'IP Address', 'Device', 'Browser']
     const rows = logs.map((l) => [
       l.createdAt.toISOString(),
       l.user?.name || 'System',
@@ -109,6 +132,7 @@ router.get('/export', protect, authorize('super_admin', 'admin'), async (req, re
       l.action,
       l.module || '',
       l.resource,
+      l.resourceLabel || '',
       l.resourceId || '',
       l.status,
       l.ipAddress || '',

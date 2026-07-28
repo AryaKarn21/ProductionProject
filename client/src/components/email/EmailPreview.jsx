@@ -4,7 +4,6 @@ import {
   Archive,
   Forward,
   Mail,
-  MoreVertical,
   Paperclip,
   Reply,
   ReplyAll,
@@ -262,14 +261,14 @@ function EmailPreview({
             />
           </button>
 
-          <button
-            type="button"
-            aria-label="More actions"
-            title="More actions"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white"
-          >
-            <MoreVertical size={18} />
-          </button>
+          {/*
+            A "More actions" button used to sit here with no onClick and
+            no menu behind it — it was reachable from all seven mail
+            folders and did nothing. Removed rather than disabled: there
+            is no partially-working feature to signal, and the reply /
+            star / archive / delete controls beside it already cover
+            every action this component actually supports.
+          */}
         </div>
       </div>
 
