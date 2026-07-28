@@ -443,12 +443,27 @@ function CompanyTab() {
 function UsersTab() {
   const [showDialog, setShowDialog] = useState(false)
   const [params, setParams] = useState({ page: 1, limit: 10 })
+  const [showUnassigned, setShowUnassigned] = useState(false)
   const navigate = useNavigate()
 
+  const query = { ...params, unassigned: showUnassigned || undefined }
+
   const { data, isLoading } = useQuery({
-    queryKey: ['settings-users', params],
-    queryFn: () => settingsAPI.getUsers(params).then((r) => r.data),
+    queryKey: ['settings-users', query],
+    queryFn: () => settingsAPI.getUsers(query).then((r) => r.data),
   })
+
+  const unassignedCount = data?.unassignedCount || 0
+  // Accounts with no home company AND no membership — the ones that are
+  // genuinely unusable, as opposed to merely untidy.
+  const blockedCount = data?.blockedCount || 0
+
+  const toggleUnassigned = () => {
+    // Reset to page 1: the unassigned list is a different, much shorter
+    // result set, so keeping the current offset would show nothing.
+    setShowUnassigned((v) => !v)
+    setParams((p) => ({ ...p, page: 1 }))
+  }
 
   const columns = [
     {
@@ -531,6 +546,39 @@ function UsersTab() {
           <Plus size={15} /> Add User
         </button>
       </div>
+
+      {/*
+        Self-registered accounts that were never assigned to a company.
+        They can sign in but every request is rejected by the tenant
+        guard, and until now they appeared in no list anywhere — so they
+        accumulated silently and could not be assigned or removed.
+      */}
+      {(unassignedCount > 0 || showUnassigned) && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5">
+          <div>
+            <p className="text-xs font-semibold text-amber-300">
+              {unassignedCount} account{unassignedCount === 1 ? '' : 's'} without a home company
+              {blockedCount > 0 && ` — ${blockedCount} of them cannot use the app at all`}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {blockedCount > 0
+                ? 'Accounts with no company and no membership can sign in but every request is rejected. Open one to assign it a company, or set its status to inactive if it is no longer needed.'
+                : 'These work through a company membership, but assigning a home company keeps their default tenant predictable.'}
+            </p>
+          </div>
+
+          <button
+            onClick={toggleUnassigned}
+            className={`flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+              showUnassigned
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+            }`}
+          >
+            {showUnassigned ? 'Show all users' : 'Review them'}
+          </button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">
         <DataTable

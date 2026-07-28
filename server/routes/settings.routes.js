@@ -451,9 +451,31 @@ router.get(
   async (req, res, next) => {
     try {
       const { page, limit, offset } = parsePagination(req)
-      const { search, status, roleId } = req.query
+      const { search, status, roleId, unassigned } = req.query
 
-      const where = { ...companyScope(req) }
+      /*
+       * Orphaned accounts.
+       *
+       * POST /auth/register creates a user with role 'employee' and no
+       * company. Until somebody assigns them, resolveCompany() rejects
+       * every request they make — so the account exists, can
+       * authenticate, and can do nothing.
+       *
+       * They were also unreachable: companyScope() only returns an
+       * unfiltered view for a super admin with NO company selected, but
+       * the axios client always sends X-Company-ID, so req.companyId
+       * was always set and `WHERE companyId = <uuid>` never matched
+       * NULL. The result was that these accounts could not be seen,
+       * assigned or deactivated from anywhere in the UI.
+       *
+       * ?unassigned=true surfaces exactly those rows. Restricted to
+       * super admin, because an unassigned user belongs to no tenant
+       * and therefore sits outside any company admin's authority.
+       */
+      const wantsUnassigned =
+        unassigned === 'true' && req.user.role === 'super_admin'
+
+      const where = wantsUnassigned ? { companyId: null } : { ...companyScope(req) }
 
       if (search) {
         where[Op.or] = [
@@ -479,7 +501,44 @@ router.get(
         distinct: true,
       })
 
-      res.json({ users: rows, total: count, page, limit })
+      /*
+       * Reported on every request so the Users screen can show the
+       * orphaned accounts rather than hiding them behind a query
+       * parameter nobody knows to type. Only a super admin can act on
+       * them, so only a super admin is told they exist.
+       *
+       * Two DIFFERENT numbers, because conflating them overstates the
+       * problem: having no home company is untidy, but only an account
+       * with no home company AND no membership is actually broken —
+       * resolveCompany() falls back to the first membership, so the
+       * others work fine.
+       */
+      let unassignedCount = 0
+      let blockedCount = 0
+
+      if (req.user.role === 'super_admin') {
+        const orphans = await User.findAll({
+          where: { companyId: null },
+          attributes: ['id'],
+          raw: true,
+        })
+        unassignedCount = orphans.length
+
+        if (orphans.length) {
+          const withMembership = await UserCompany.findAll({
+            where: {
+              userId: { [Op.in]: orphans.map((o) => o.id) },
+              isActive: { [Op.ne]: false },
+            },
+            attributes: ['userId'],
+            raw: true,
+          })
+          const rescued = new Set(withMembership.map((m) => String(m.userId)))
+          blockedCount = orphans.filter((o) => !rescued.has(String(o.id))).length
+        }
+      }
+
+      res.json({ users: rows, total: count, page, limit, unassignedCount, blockedCount })
     } catch (err) {
       next(err)
     }
