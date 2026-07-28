@@ -5,6 +5,7 @@ import { authorizePermission, protect } from "../middleware/auth.js";
 import { createNotification } from "../services/notification.service.js";
 
 import multer from "multer";
+import { findInScope } from '../utils/scope.js'
 const uploadAccountsCsv = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
@@ -221,7 +222,7 @@ router.post("/import", protect, authorizePermission('accounts.view'), uploadAcco
 
 router.get("/:id", protect, authorizePermission('accounts.view'), async (req, res, next) => {
   try {
-    const account = await Account.findByPk(req.params.id, {
+    const account = await findInScope(req, Account, req.params.id, {
       include: [{ model: User, as: "assignedTo", attributes: ["id", "name"] }],
     });
     if (!account) return res.status(404).json({ message: "Account not found" });
@@ -266,7 +267,7 @@ router.post("/", protect, authorizePermission('accounts.view'), async (req, res,
 console.log("Assignment notification created.");
 router.patch("/:id", protect, authorizePermission('accounts.view'), async (req, res, next) => {
   try {
-    const account = await Account.findByPk(req.params.id);
+    const account = await findInScope(req, Account, req.params.id);
 
     if (!account) {
       return res.status(404).json({
@@ -335,7 +336,7 @@ router.patch("/:id", protect, authorizePermission('accounts.view'), async (req, 
 
 router.delete("/:id", protect, authorizePermission('accounts.view'), async (req, res, next) => {
   try {
-    const account = await Account.findByPk(req.params.id);
+    const account = await findInScope(req, Account, req.params.id);
 
     if (!account) {
       return res.status(404).json({

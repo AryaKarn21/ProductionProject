@@ -6,6 +6,60 @@ import { createNotification } from "../services/notification.service.js";
 
 const router = express.Router();
 
+/*
+|--------------------------------------------------------------------------
+| Tenant scoping
+|--------------------------------------------------------------------------
+|
+| Every :id route in this file used a bare Lead.findByPk(req.params.id)
+| with no company check. server.js does mount this router behind
+| resolveCompany, so req.companyId was available and trustworthy — the
+| handlers simply never looked at it.
+|
+| The effect: any authenticated user could read, edit, restage, comment
+| on and DELETE a lead belonging to any other company on the platform,
+| just by knowing or guessing its UUID. settings.routes.js already solved
+| this correctly with findUserInScope(); this is the same pattern.
+|
+| Returns 404 rather than 403 for a lead in another company, so the
+| response cannot be used to confirm that an id exists elsewhere.
+*/
+const findLeadInScope = async (req, id, options = {}) => {
+  const lead = await Lead.findByPk(id, options);
+  if (!lead) return null;
+
+  // A super admin browsing with no company selected sees everything.
+  if (req.user.role === "super_admin" && !req.companyId) return lead;
+
+  if (String(lead.companyId) !== String(req.companyId)) return null;
+
+  return lead;
+};
+
+/*
+| Fields a client may write. `companyId` is the important omission: with
+| the raw `lead.update(req.body)` this replaces, a caller could move a
+| lead into another tenant, or overwrite id / convertedAccountId /
+| convertedOpportunityId and corrupt the conversion chain.
+*/
+const LEAD_WRITABLE_FIELDS = [
+  "name",
+  "email",
+  "phone",
+  "company_name",
+  "stage",
+  "source",
+  "value",
+  "assignedToId",
+  "tags",
+];
+
+const pick = (source, allowed) =>
+  allowed.reduce((acc, key) => {
+    if (source[key] !== undefined) acc[key] = source[key];
+    return acc;
+  }, {});
+
 // GET /api/leads
 router.get("/", protect, authorizePermission('leads.view'), async (req, res, next) => {
   try {
@@ -59,7 +113,7 @@ router.get("/new", protect, authorizePermission('leads.view'), (req, res) => {
 // GET /api/leads/:id
 router.get("/:id", protect, authorizePermission('leads.view'), async (req, res, next) => {
   try {
-    const lead = await Lead.findByPk(req.params.id, {
+    const lead = await findLeadInScope(req, req.params.id, {
       include: [
         { model: User, as: "assignedTo", attributes: ["id", "name", "email"] },
       ],
@@ -73,13 +127,17 @@ router.get("/:id", protect, authorizePermission('leads.view'), async (req, res, 
 
 // POST /api/leads
 // POST /api/leads
-router.post("/", protect, authorizePermission('leads.view'), async (req, res, next) => {
+router.post("/", protect, authorizePermission('leads.create'), async (req, res, next) => {
   try {
-     const company = req.companyId;
-    const { notes, ...leadData } = req.body;
+    const company = req.companyId;
+    const { notes } = req.body;
 
+    // Whitelisted for the same reason as PATCH: the spread of the raw
+    // body let a caller set `id` or the convertedAccountId /
+    // convertedContactId / convertedOpportunityId chain on a brand new
+    // lead, pointing it at records in another company.
     const lead = await Lead.create({
-      ...leadData,
+      ...pick(req.body, LEAD_WRITABLE_FIELDS),
       ...(company && { companyId: company }),
     });
     await createNotification({
@@ -156,11 +214,11 @@ router.post("/", protect, authorizePermission('leads.view'), async (req, res, ne
 });
 
 // PATCH /api/leads/:id
-router.patch("/:id", protect, authorizePermission('leads.view'), async (req, res, next) => {
+router.patch("/:id", protect, authorizePermission('leads.update'), async (req, res, next) => {
   try {
-    const lead = await Lead.findByPk(req.params.id);
+    const lead = await findLeadInScope(req, req.params.id);
     if (!lead) return res.status(404).json({ message: "Lead not found" });
-    await lead.update(req.body);
+    await lead.update(pick(req.body, LEAD_WRITABLE_FIELDS));
     await lead.reload({
       include: [
         { model: User, as: "assignedTo", attributes: ["id", "name", "email"] },
@@ -173,9 +231,9 @@ router.patch("/:id", protect, authorizePermission('leads.view'), async (req, res
 });
 
 // PATCH /api/leads/:id/stage
-router.patch("/:id/stage", protect, authorizePermission('leads.view'), async (req, res, next) => {
+router.patch("/:id/stage", protect, authorizePermission('leads.update'), async (req, res, next) => {
   try {
-    const lead = await Lead.findByPk(req.params.id);
+    const lead = await findLeadInScope(req, req.params.id);
     if (!lead) return res.status(404).json({ message: "Lead not found" });
     await lead.update({ stage: req.body.stage });
     res.json(lead);
@@ -185,9 +243,13 @@ router.patch("/:id/stage", protect, authorizePermission('leads.view'), async (re
 });
 
 // DELETE /api/leads/:id
-router.delete("/:id", protect, authorizePermission('leads.view'), async (req, res, next) => {
+router.delete("/:id", protect, authorizePermission('leads.delete'), async (req, res, next) => {
   try {
-    await Lead.destroy({ where: { id: req.params.id } });
+    // Was an unscoped Lead.destroy({ where: { id } }) — it deleted the
+    // row whoever it belonged to, and returned success either way.
+    const lead = await findLeadInScope(req, req.params.id);
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+    await lead.destroy();
     res.json({ message: "Lead deleted" });
   } catch (err) {
     next(err);
@@ -195,9 +257,9 @@ router.delete("/:id", protect, authorizePermission('leads.view'), async (req, re
 });
 
 // POST /api/leads/:id/notes
-router.post("/:id/notes", protect, authorizePermission('leads.view'), async (req, res, next) => {
+router.post("/:id/notes", protect, authorizePermission('leads.update'), async (req, res, next) => {
   try {
-    const lead = await Lead.findByPk(req.params.id);
+    const lead = await findLeadInScope(req, req.params.id);
     if (!lead) return res.status(404).json({ message: "Lead not found" });
     await LeadNote.create({
       leadId: lead.id,
@@ -214,7 +276,7 @@ router.post("/:id/notes", protect, authorizePermission('leads.view'), async (req
 // GET /api/leads/:id/timeline
 router.get("/:id/timeline", protect, authorizePermission('leads.view'), async (req, res, next) => {
   try {
-    const lead = await Lead.findByPk(req.params.id, {
+    const lead = await findLeadInScope(req, req.params.id, {
       include: [
         {
           model: LeadNote,

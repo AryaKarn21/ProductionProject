@@ -2,6 +2,7 @@ import express from 'express'
 import { Op } from 'sequelize'
 import { Ticket, TicketReply, User } from '../models/index.js'
 import { protect } from '../middleware/auth.js'
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router()
 const getCompany = (req) => req.headers['x-company-id'] || null
@@ -34,7 +35,7 @@ router.get('/', protect, async (req, res, next) => {
 
 router.get('/:id', protect, async (req, res, next) => {
   try {
-    const ticket = await Ticket.findByPk(req.params.id, {
+    const ticket = await findInScope(req, Ticket, req.params.id, {
       include: [
         { model: User, as: 'assignedTo', attributes: ['name', ] },
         { model: User, as: 'createdBy', attributes: ['name'] },
@@ -61,7 +62,7 @@ router.post('/', protect, async (req, res, next) => {
 
 router.patch('/:id', protect, async (req, res, next) => {
   try {
-    const ticket = await Ticket.findByPk(req.params.id)
+    const ticket = await findInScope(req, Ticket, req.params.id)
 
     if (!ticket)
       return res.status(404).json({ message: 'Ticket not found' })
@@ -84,7 +85,7 @@ router.patch('/:id', protect, async (req, res, next) => {
 
 router.post('/:id/replies', protect, async (req, res, next) => {
   try {
-    const ticket = await Ticket.findByPk(req.params.id)
+    const ticket = await findInScope(req, Ticket, req.params.id)
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' })
     await TicketReply.create({
       ticketId: ticket.id,

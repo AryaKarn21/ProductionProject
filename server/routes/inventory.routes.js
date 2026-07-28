@@ -11,6 +11,7 @@ import {
 } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
 import { createNotification } from "../services/notification.service.js";
+import { findInScope } from '../utils/scope.js'
 const router = express.Router();
 const getCompany = (req) => req.companyId;
 
@@ -91,7 +92,7 @@ router.post("/items", protect, async (req, res, next) => {
 
 router.patch("/items/:id", protect, async (req, res, next) => {
   try {
-    const item = await InventoryItem.findByPk(req.params.id);
+    const item = await findInScope(req, InventoryItem, req.params.id);
 
     if (!item) {
       return res.status(404).json({
@@ -131,7 +132,7 @@ router.patch("/items/:id", protect, async (req, res, next) => {
 
 router.delete("/items/:id", protect, async (req, res, next) => {
   try {
-    const item = await InventoryItem.findByPk(req.params.id);
+    const item = await findInScope(req, InventoryItem, req.params.id);
 
     if (!item) {
       return res.status(404).json({
@@ -183,7 +184,7 @@ router.get("/warehouses", protect, async (req, res, next) => {
 
 router.get("/warehouses/:id", protect, async (req, res, next) => {
   try {
-    const warehouse = await Warehouse.findByPk(req.params.id);
+    const warehouse = await findInScope(req, Warehouse, req.params.id);
 
     if (!warehouse) {
       return res.status(404).json({
@@ -248,7 +249,7 @@ router.post("/warehouses", protect, async (req, res, next) => {
 
 router.patch("/warehouses/:id", protect, async (req, res, next) => {
   try {
-    const warehouse = await Warehouse.findByPk(req.params.id);
+    const warehouse = await findInScope(req, Warehouse, req.params.id);
 
     if (!warehouse) {
       return res.status(404).json({
@@ -287,7 +288,7 @@ router.patch("/warehouses/:id", protect, async (req, res, next) => {
 
 router.delete("/warehouses/:id", protect, async (req, res, next) => {
   try {
-    const warehouse = await Warehouse.findByPk(req.params.id);
+    const warehouse = await findInScope(req, Warehouse, req.params.id);
 
     if (!warehouse) {
       return res.status(404).json({
@@ -362,7 +363,7 @@ router.get("/assets", protect, async (req, res) => {
 });
 router.get("/assets/:id", protect, async (req, res, next) => {
   try {
-    const asset = await Asset.findByPk(req.params.id);
+    const asset = await findInScope(req, Asset, req.params.id);
 
     if (!asset) {
       return res.status(404).json({
@@ -390,7 +391,7 @@ router.post("/assets", protect, async (req, res, next) => {
 
 router.patch("/assets/:id", protect, async (req, res, next) => {
   try {
-    const asset = await Asset.findByPk(req.params.id);
+    const asset = await findInScope(req, Asset, req.params.id);
     if (!asset) return res.status(404).json({ message: "Asset not found" });
     await asset.update(req.body);
     res.json(asset);
@@ -401,7 +402,7 @@ router.patch("/assets/:id", protect, async (req, res, next) => {
 
 router.delete("/assets/:id", protect, async (req, res, next) => {
   try {
-    const asset = await Asset.findByPk(req.params.id);
+    const asset = await findInScope(req, Asset, req.params.id);
 
     if (!asset) {
       return res.status(404).json({
@@ -465,7 +466,7 @@ router.get("/transfers", protect, async (req, res) => {
 
 router.get("/transfers/:id", protect, async (req, res) => {
   try {
-    const transfer = await StockTransfer.findByPk(req.params.id);
+    const transfer = await findInScope(req, StockTransfer, req.params.id);
 
     if (!transfer) {
       return res.status(404).json({
@@ -574,7 +575,7 @@ router.post("/transfers", protect, async (req, res) => {
 
 router.delete("/transfers/:id", protect, async (req, res) => {
   try {
-    const transfer = await StockTransfer.findByPk(req.params.id);
+    const transfer = await findInScope(req, StockTransfer, req.params.id);
 
     if (!transfer) {
       return res.status(404).json({
@@ -637,7 +638,7 @@ router.get("/adjustments", protect, async (req, res) => {
 });
 router.get("/adjustments/:id", protect, async (req, res) => {
   try {
-    const adjustment = await StockAdjustment.findByPk(req.params.id);
+    const adjustment = await findInScope(req, StockAdjustment, req.params.id);
 
     if (!adjustment) {
       return res.status(404).json({
@@ -747,7 +748,7 @@ router.post("/adjustments", protect, async (req, res) => {
 
 router.delete("/adjustments/:id", protect, async (req, res) => {
   try {
-    const adjustment = await StockAdjustment.findByPk(req.params.id);
+    const adjustment = await findInScope(req, StockAdjustment, req.params.id);
 
     if (!adjustment) {
       return res.status(404).json({

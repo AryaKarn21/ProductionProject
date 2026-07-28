@@ -8,6 +8,7 @@ import {
   finalizeAbsencesForDate,
   finalizeAbsencesForRange,
 } from "../services/attendanceFinalization.service.js";
+import { findInScope } from '../utils/scope.js'
 const router = express.Router();
 
 const getCompany = (req) => req.companyId || req.headers['x-company-id'] || req.headers['x-company-id'] || req.get('X-Company-ID');
@@ -266,7 +267,7 @@ router.patch("/:id", protect, async (req, res, next) => {
       });
     }
 
-    const record = await Attendance.findByPk(req.params.id);
+    const record = await findInScope(req, Attendance, req.params.id);
 
     if (!record) {
       return res.status(404).json({
@@ -395,7 +396,7 @@ router.delete("/:id", protect, async (req, res, next) => {
       });
     }
 
-    const record = await Attendance.findByPk(req.params.id);
+    const record = await findInScope(req, Attendance, req.params.id);
 
     if (!record) {
       return res.status(404).json({

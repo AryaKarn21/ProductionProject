@@ -2,6 +2,7 @@ import express from 'express'
 import { sequelize } from '../config/db.js'
 import { Project, ProjectMember, Task, User } from '../models/index.js'
 import { protect } from '../middleware/auth.js'
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router()
 const getCompany = (req) => req.headers['x-company-id'] || req.headers['x-company-id'] || req.get('X-Company-ID') || null
@@ -28,7 +29,7 @@ router.get('/', protect, async (req, res, next) => {
 
 router.get('/:id', protect, async (req, res, next) => {
   try {
-    const project = await Project.findByPk(req.params.id, {
+    const project = await findInScope(req, Project, req.params.id, {
       include: [
         { model: User, as: 'manager', attributes: ['name'] },
         { model: ProjectMember, as: 'members', include: [{ model: User, as: 'user', attributes: ['name'] }] },
@@ -62,7 +63,7 @@ router.post('/', protect, async (req, res, next) => {
 
 router.patch('/:id', protect, async (req, res, next) => {
   try {
-    const project = await Project.findByPk(req.params.id)
+    const project = await findInScope(req, Project, req.params.id)
     if (!project) return res.status(404).json({ message: 'Project not found' })
     await project.update(req.body)
     res.json(project)
@@ -97,7 +98,7 @@ router.post('/:id/tasks', protect, async (req, res, next) => {
 
 router.patch('/tasks/:taskId', protect, async (req, res, next) => {
   try {
-    const task = await Task.findByPk(req.params.taskId)
+    const task = await findInScope(req, Task, req.params.taskId)
     if (!task) return res.status(404).json({ message: 'Task not found' })
     const updates = { ...req.body }
     if (updates.completed === true && !task.completed) updates.completedAt = new Date()

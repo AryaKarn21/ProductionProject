@@ -3,6 +3,7 @@ import { Op, fn, col } from 'sequelize'
 import { sequelize } from '../config/db.js'
 import { Vendor, PurchaseOrder, PurchaseOrderItem, User } from '../models/index.js'
 import { protect } from '../middleware/auth.js'
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router()
 const getCompany = (req) => req.headers['x-company-id'] || null
@@ -179,7 +180,7 @@ router.put('/orders/:id', protect, async (req, res, next) => {
 
 router.patch('/vendors/:id', protect, async (req, res, next) => {
   try {
-    const vendor = await Vendor.findByPk(req.params.id)
+    const vendor = await findInScope(req, Vendor, req.params.id)
     if (!vendor) return res.status(404).json({ message: 'Vendor not found' })
     await vendor.update(req.body)
     res.json(vendor)
@@ -290,7 +291,7 @@ router.patch('/orders/:id/submit', protect, async (req, res, next) => {
 
 router.patch('/orders/:id/approve', protect, async (req, res, next) => {
   try {
-    const order = await PurchaseOrder.findByPk(req.params.id)
+    const order = await findInScope(req, PurchaseOrder, req.params.id)
     if (!order) return res.status(404).json({ message: 'Purchase order not found' })
     await order.update({ status: 'approved', approvedById: req.user.id })
     res.json(order)
@@ -299,7 +300,7 @@ router.patch('/orders/:id/approve', protect, async (req, res, next) => {
 
 router.patch('/orders/:id/receive', protect, async (req, res, next) => {
   try {
-    const order = await PurchaseOrder.findByPk(req.params.id)
+    const order = await findInScope(req, PurchaseOrder, req.params.id)
     if (!order) return res.status(404).json({ message: 'Purchase order not found' })
     await order.update({ status: 'received', receivedDate: new Date() })
     res.json(order)
@@ -308,7 +309,7 @@ router.patch('/orders/:id/receive', protect, async (req, res, next) => {
 
 router.get('/vendors/:id', protect, async (req, res, next) => {
   try {
-    const vendor = await Vendor.findByPk(req.params.id)
+    const vendor = await findInScope(req, Vendor, req.params.id)
     if (!vendor) return res.status(404).json({ message: 'Vendor not found' })
     res.json(vendor)
   } catch (err) { next(err) }
@@ -316,7 +317,7 @@ router.get('/vendors/:id', protect, async (req, res, next) => {
 
 router.patch('/orders/:id/cancel', protect, async (req, res, next) => {
   try {
-    const order = await PurchaseOrder.findByPk(req.params.id)
+    const order = await findInScope(req, PurchaseOrder, req.params.id)
     if (!order) return res.status(404).json({ message: 'Purchase order not found' })
     await order.update({ status: 'cancelled' })
     res.json(order)

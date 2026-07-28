@@ -1,6 +1,7 @@
 import express from "express";
 import { Shift } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router();
 
@@ -41,7 +42,7 @@ router.post("/", protect, async (req, res, next) => {
 // Update shift
 router.patch("/:id", protect, async (req, res, next) => {
   try {
-    const shift = await Shift.findByPk(req.params.id);
+    const shift = await findInScope(req, Shift, req.params.id);
 
     if (!shift) {
       return res.status(404).json({
@@ -60,7 +61,7 @@ router.patch("/:id", protect, async (req, res, next) => {
 // Delete shift
 router.delete("/:id", protect, async (req, res, next) => {
   try {
-    const shift = await Shift.findByPk(req.params.id);
+    const shift = await findInScope(req, Shift, req.params.id);
 
     if (!shift) {
       return res.status(404).json({
