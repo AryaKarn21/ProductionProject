@@ -30,3 +30,5 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+# Claude Code local tooling config (per-developer, not shared)
+.claude/
