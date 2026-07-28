@@ -16,6 +16,7 @@ import { settingsAPI } from '@/api/settings.api'
 import { rolesAPI } from '@/api/roles.api'
 import { authAPI } from '@/api/auth.api'
 import { useAuthStore } from '@/store/auth.store'
+import usePermission from '@/hooks/usePermission'
 import { useForm } from 'react-hook-form'
 import { formatDate } from '@/lib/utils'
 import DataTable from '@/components/shared/DataTable'
@@ -123,7 +124,8 @@ function CompanyTab() {
   const queryClient = useQueryClient()
   const [showDialog, setShowDialog] = useState(false)
   const [editingCompany, setEditingCompany] = useState(null)
-  const { refreshCompanies } = useAuthStore()
+  const { refreshCompanies, activeCompany } = useAuthStore()
+  const { isSuperAdmin } = usePermission()
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: {
@@ -136,7 +138,11 @@ function CompanyTab() {
       address: '',
       currency: 'NPR',
       timezone: 'Asia/Kathmandu',
-      parentId: '',
+      // A new company defaults to sitting under the company you are
+      // currently working in, so subsidiaries join the group without
+      // anyone having to remember to set it. The server applies the
+      // same default, so the two cannot disagree.
+      parentId: activeCompany || '',
     },
   })
 
@@ -381,7 +387,16 @@ function CompanyTab() {
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Parent Company">
                   <select {...register('parentId')} className={inputCls}>
-                    <option value="">None — top-level company</option>
+                    {/*
+                      Only a super admin may detach a company from the
+                      group. For everyone else the option is not offered,
+                      and the server enforces the same rule — a
+                      top-level company is outside every parent's
+                      oversight, which should be a deliberate act.
+                    */}
+                    {isSuperAdmin && (
+                      <option value="">None — independent, top-level company</option>
+                    )}
                     {parentOptions.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}

@@ -233,7 +233,29 @@ router.post(
       // Whitelisted — a caller can no longer set `id` or `isActive` by
       // slipping them into the body. parentId is handled separately so
       // it goes through the existence + cycle check.
-      const { parentId } = req.body
+
+      /*
+       * A new company joins the group by default.
+       *
+       * Previously this stored `parentId || null`, so any company
+       * created without explicitly picking a parent became a top-level
+       * root — invisible to the Group Console, and silently outside the
+       * parent company's oversight. That is the opposite of what you
+       * want when you add a subsidiary from inside OS Group.
+       *
+       * So: omitted parent means "under the company I am working in".
+       * Creating a genuinely independent, top-level company is still
+       * possible, but it now has to be asked for explicitly, and only a
+       * super admin may do it — otherwise an admin could quietly park a
+       * company outside the group where nobody is watching it.
+       */
+      let parentId = req.body.parentId
+
+      if (parentId === undefined) {
+        parentId = req.companyId ?? null
+      } else if (parentId === null || parentId === '') {
+        parentId = req.user.role === 'super_admin' ? null : req.companyId ?? null
+      }
 
       if (parentId) {
         const parent = await Company.findByPk(parentId, { transaction: t })
