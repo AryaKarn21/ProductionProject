@@ -17,6 +17,7 @@ import { rolesAPI } from '@/api/roles.api'
 import { authAPI } from '@/api/auth.api'
 import { useAuthStore } from '@/store/auth.store'
 import usePermission from '@/hooks/usePermission'
+import useCompanyScope from '@/hooks/useCompanyScope'
 import { useForm } from 'react-hook-form'
 import { formatDate } from '@/lib/utils'
 import DataTable from '@/components/shared/DataTable'
@@ -51,14 +52,62 @@ export default function Settings() {
    * An unknown or absent ?tab falls back to 'company', so existing
    * /settings links keep landing exactly where they used to.
    */
+  /*
+   * ── Companies is a PARENT-COMPANY tab ──────────────────────────
+   *
+   * A child company has exactly one company record — its own — and no
+   * business managing the group's roster, so the tab is removed
+   * entirely rather than shown empty or read-only-with-no-rows.
+   *
+   * `defaultTab` is computed from what is actually VISIBLE instead of
+   * being hardcoded to 'company'. Otherwise a child-company user
+   * landing on plain /settings would fall back to a tab that is not in
+   * their strip, and see a blank panel under a tab row where none looks
+   * selected.
+   *
+   * isParentSuperAdmin is passed down to CompanyTab as `canManage`: a
+   * parent-company ADMIN may look at the roster, but only the parent
+   * company's SUPER ADMIN may add, edit or delete. The server enforces
+   * the same split in routes/settings.routes.js.
+   */
+  const { isParentCompany, isParentSuperAdmin } = useCompanyScope()
+
+  /*
+   * Tab visibility:
+   *
+   *   company  parent company only — a child has one company record, its
+   *            own, and no business managing the group's roster.
+   *
+   *   roles    parent company's SUPER ADMIN only. Roles decide who can
+   *            see and do what across the whole group, so authoring them
+   *            is the narrowest permission in the product. A child
+   *            company inherits the group's roles; it does not write
+   *            them, and it does not get a screen implying it could.
+   *
+   *   audit    parent company only. The audit log answers "who changed
+   *            what, and when" across the organisation — a
+   *            group-oversight surface, held by the parent.
+   *
+   * Users stays open to whoever holds users.view: a child company still
+   * administers its own people, and removing that would leave
+   * subsidiaries unable to onboard anyone.
+   */
+  const visibleTabs = TABS.filter((t) => {
+    if (t.key === 'company') return isParentCompany
+    if (t.key === 'roles') return isParentSuperAdmin
+    if (t.key === 'audit') return isParentCompany
+    return true
+  })
+  const defaultTab = visibleTabs[0]?.key || 'users'
+
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('tab')
-  const activeTab = TABS.some((t) => t.key === requested) ? requested : 'company'
+  const activeTab = visibleTabs.some((t) => t.key === requested) ? requested : defaultTab
 
   const setActiveTab = (key) =>
     // replace, not push: clicking through four tabs should not put four
     // entries in the history stack for the user to back out through.
-    setSearchParams(key === 'company' ? {} : { tab: key }, { replace: true })
+    setSearchParams(key === defaultTab ? {} : { tab: key }, { replace: true })
 
   return (
     <div className="space-y-6 p-4 sm:p-6 max-w-[1600px] mx-auto w-full animate-fade-in">
@@ -72,7 +121,7 @@ export default function Settings() {
 
       {/* Tab Navigation */}
       <div className="flex border-b border-slate-800 space-x-1 overflow-x-auto no-scrollbar">
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.key
           return (
@@ -94,10 +143,18 @@ export default function Settings() {
 
       {/* Tab Views */}
       <div className="pt-2">
-        {activeTab === 'company' && <CompanyTab />}
+        {/* The isParentCompany repeat is not redundant: ?tab=company in
+            the URL is user-controlled, and visibleTabs only governs which
+            BUTTONS render, not which panel mounts. */}
+        {activeTab === 'company' && isParentCompany && (
+          <CompanyTab canManage={isParentSuperAdmin} />
+        )}
         {activeTab === 'users' && <UsersTab />}
-        {activeTab === 'roles' && <RolesTab />}
-        {activeTab === 'audit' && <AuditTab />}
+        {/* Same reasoning as the company panel: ?tab=roles is
+            user-controlled, so the panel is guarded independently of
+            which buttons render. */}
+        {activeTab === 'roles' && isParentSuperAdmin && <RolesTab />}
+        {activeTab === 'audit' && isParentCompany && <AuditTab />}
       </div>
     </div>
   )
@@ -120,7 +177,15 @@ const FormField = ({ label, children }) => (
 const inputCls =
   "w-full rounded-lg border border-slate-800 bg-slate-950 p-2 text-slate-200 focus:border-blue-500 focus:outline-none"
 
-function CompanyTab() {
+/*
+| Company roster.
+|
+| `canManage` is true only for the parent company's super admin. When
+| false the table renders read-only: no Add button, no row actions.
+| Defaults to false so a future caller that forgets the prop gets the
+| safe behaviour rather than the permissive one.
+*/
+function CompanyTab({ canManage = false }) {
   const queryClient = useQueryClient()
   const [showDialog, setShowDialog] = useState(false)
   const [editingCompany, setEditingCompany] = useState(null)
@@ -233,16 +298,18 @@ function CompanyTab() {
           <p className="text-xs text-slate-400">Manage companies operating within this CRM workspace</p>
         </div>
 
-        <button
-          className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-          onClick={() => {
-            reset()
-            setEditingCompany(null)
-            setShowDialog(true)
-          }}
-        >
-          <Plus size={15} /> Add Company
-        </button>
+        {canManage && (
+          <button
+            className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+            onClick={() => {
+              reset()
+              setEditingCompany(null)
+              setShowDialog(true)
+            }}
+          >
+            <Plus size={15} /> Add Company
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">
@@ -278,29 +345,35 @@ function CompanyTab() {
                     <td className="p-3.5 text-slate-400">{company.email || '—'}</td>
                     <td className="p-3.5 text-slate-400">{company.phone || '—'}</td>
                     <td className="p-3.5 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
-                          onClick={() => {
-                            setEditingCompany(company)
-                            setShowDialog(true)
-                          }}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                          onClick={() => {
-                            if (window.confirm(`Delete company "${company.name}"?`)) {
-                              deleteMutation.mutate(company.id)
-                            }
-                          }}
-                          title="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      {canManage ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+                            onClick={() => {
+                              setEditingCompany(company)
+                              setShowDialog(true)
+                            }}
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                            onClick={() => {
+                              if (window.confirm(`Delete company "${company.name}"?`)) {
+                                deleteMutation.mutate(company.id)
+                              }
+                            }}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-600" title="Only the parent company's super admin can manage companies">
+                          &mdash;
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -350,6 +350,48 @@ Employee.init(
     },
 
     // =========================================================
+    // Background (education + past employment)
+    // =========================================================
+    //
+    // The detail lives in two child tables — employee_educations and
+    // employee_experiences. These two columns are the SUMMARY, kept
+    // here so the employee list can filter and sort on them without
+    // joining and aggregating two tables on every page load.
+
+    /*
+     * Fresher or experienced.
+     *
+     * Stored explicitly rather than derived from "are there any
+     * experience rows?", because that question cannot tell a genuine
+     * fresher apart from a record nobody has filled in yet. Those are
+     * very different things to an HR manager, and conflating them
+     * means the gap never gets noticed.
+     */
+    employmentBackground: {
+      type: DataTypes.ENUM(
+        "Fresher",
+        "Experienced"
+      ),
+      defaultValue: "Fresher",
+    },
+
+    /*
+     * Total prior experience in MONTHS.
+     *
+     * Months, not years: "2.5 years" as a float invites rounding
+     * arguments at appraisal time, and an integer month count is
+     * exact. Recalculated server-side from employee_experiences
+     * whenever a row is added, edited or removed — never written
+     * directly from a request body, so it cannot drift from the rows
+     * it summarises.
+     */
+    totalExperienceMonths: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+      validate: { min: 0 },
+    },
+
+    // =========================================================
     // Misc
     // =========================================================
 

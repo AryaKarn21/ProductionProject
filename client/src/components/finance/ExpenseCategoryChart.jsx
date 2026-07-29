@@ -1,4 +1,5 @@
 import Chart from "react-apexcharts";
+import { formatCurrency } from "@/lib/utils";
 
 export default function ExpenseCategoryChart({ data = [] }) {
   const categories = data.length > 0
@@ -14,7 +15,7 @@ export default function ExpenseCategoryChart({ data = [] }) {
     labels: categories,
     legend: { position: "bottom" },
     dataLabels: { enabled: true },
-    tooltip: { y: { formatter: (value) => `$${value.toLocaleString()}` } },
+    tooltip: { y: { formatter: (value) => formatCurrency(value) } },
     responsive: [{ breakpoint: 768, options: { legend: { position: "bottom" } } }],
   };
 

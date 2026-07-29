@@ -1,6 +1,7 @@
 import express from "express";
-import { Meeting, User, Company } from "../models/index.js";
+import { Meeting, MeetingAttendee, User, Company } from "../models/index.js";
 import { notifyMeetingCreated } from "../services/notification.service.js";
+import { sendMeetingCancellationEmail } from "../services/emailNotification.service.js";
 
 const router = express.Router();
 
@@ -170,6 +171,14 @@ router.patch("/:id", async (req, res) => {
         companyId: req.companyId,
         isDeleted: false,
       },
+      include: [
+        { model: User, as: "organizer", attributes: ["id", "name", "email"] },
+        {
+          model: MeetingAttendee,
+          as: "attendees",
+          include: [{ model: User, as: "user", attributes: ["id", "name", "email"] }],
+        },
+      ],
     });
 
     if (!meeting) {
@@ -201,6 +210,15 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
+    // Captured before the update so an emailed "what changed" is accurate,
+    // and so attendees only get a re-sent invite when something they'd
+    // actually care about moved — not on every unrelated field edit.
+    const scheduleChanged =
+      (startTime && new Date(startTime).getTime() !== new Date(meeting.startTime).getTime()) ||
+      (endTime && new Date(endTime).getTime() !== new Date(meeting.endTime).getTime()) ||
+      (location != null && location !== meeting.location) ||
+      (meetingLink != null && meetingLink !== meeting.meetingLink);
+
     await meeting.update({
       title: title ?? meeting.title,
       description: description ?? meeting.description,
@@ -215,6 +233,22 @@ router.patch("/:id", async (req, res) => {
     });
 
     await meeting.reload();
+
+    if (scheduleChanged) {
+      for (const attendee of meeting.attendees || []) {
+        if (!attendee.user?.email) continue;
+        sendMeetingInviteEmail({
+          to: attendee.user.email,
+          recipientName: attendee.user.name,
+          meeting,
+          organizer: meeting.organizer
+            ? { name: meeting.organizer.name, email: meeting.organizer.email }
+            : undefined,
+        }).catch((err) =>
+          console.error(`Meeting update email failed for ${attendee.user.email}:`, err.message)
+        );
+      }
+    }
 
     res.json({
       success: true,
@@ -242,6 +276,14 @@ router.delete("/:id", async (req, res) => {
         companyId: req.companyId,
         isDeleted: false,
       },
+      include: [
+        { model: User, as: "organizer", attributes: ["id", "name", "email"] },
+        {
+          model: MeetingAttendee,
+          as: "attendees",
+          include: [{ model: User, as: "user", attributes: ["id", "name", "email"] }],
+        },
+      ],
     });
 
     if (!meeting) {
@@ -256,6 +298,22 @@ router.delete("/:id", async (req, res) => {
       deletedAt: new Date(),
       deletedBy: req.user.id,
     });
+
+    // Best-effort, same as the invite path: a cancellation email failing
+    // to send should never block the meeting actually being cancelled.
+    for (const attendee of meeting.attendees || []) {
+      if (!attendee.user?.email) continue;
+      sendMeetingCancellationEmail({
+        to: attendee.user.email,
+        recipientName: attendee.user.name,
+        meeting,
+        organizer: meeting.organizer
+          ? { name: meeting.organizer.name, email: meeting.organizer.email }
+          : undefined,
+      }).catch((err) =>
+        console.error(`Meeting cancellation email failed for ${attendee.user.email}:`, err.message)
+      );
+    }
 
     res.json({
       success: true,

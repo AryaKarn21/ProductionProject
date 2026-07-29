@@ -64,6 +64,9 @@ const EmployeeEdit = lazy(() => import("@/pages/hr/employees/EmployeeEdit"));
 const AttendanceLogs = lazy(
   () => import("@/pages/hr/attendance/AttendanceLogs"),
 );
+const AttendanceRegister = lazy(
+  () => import("@/pages/hr/attendance/AttendanceRegister"),
+);
 const Holidays = lazy(
   () => import("@/pages/hr/attendance/Holidays"),
 );
@@ -326,6 +329,10 @@ export const router = createBrowserRouter([
             element: G("attendance.view", <AttendanceLogs />),
           },
 
+          {
+            path: "/hr/attendance/register",
+            element: G("attendance.view", <AttendanceRegister />),
+          },
           {
             path: "/hr/attendance/holidays",
             element: G("attendance.view", <Holidays />),

@@ -8,6 +8,12 @@ import {
   Headphones,
   Wallet,
   Target,
+  UserCheck,
+  Truck,
+  ShoppingCart,
+  CalendarCheck,
+  Banknote,
+  Mail,
 } from 'lucide-react'
 import { groupAPI } from '@/api/group.api'
 import { formatCurrency } from '@/lib/utils'
@@ -68,7 +74,7 @@ export default function GroupCompanyDetail() {
     )
   }
 
-  const { company, stats, recentActivity } = data
+  const { company, stats, recentActivity, periodDays = 30 } = data
   const currency = company.currency || 'NPR'
 
   return (
@@ -144,6 +150,35 @@ export default function GroupCompanyDetail() {
           value={formatCurrency(stats.expensePending, currency)}
           icon={Wallet}
           tone={stats.expensePending > 0 ? 'warn' : 'default'}
+        />
+        <GroupKpiCard label="Users" value={stats.users} sub="active seats" icon={UserCheck} />
+        <GroupKpiCard label="Clients" value={stats.clients} icon={Users} />
+        <GroupKpiCard label="Vendors" value={stats.vendors} icon={Truck} />
+        <GroupKpiCard
+          label="Purchase orders"
+          value={stats.purchaseOrdersTotal}
+          sub={`${stats.purchaseOrdersPending} pending`}
+          icon={ShoppingCart}
+          tone={stats.purchaseOrdersPending > 0 ? 'warn' : 'default'}
+        />
+        <GroupKpiCard
+          label="Attendance"
+          value={stats.attendancePct != null ? `${stats.attendancePct}%` : '—'}
+          sub={`present, last ${periodDays}d`}
+          icon={CalendarCheck}
+          tone={stats.attendancePct != null && stats.attendancePct < 80 ? 'warn' : 'default'}
+        />
+        <GroupKpiCard
+          label="Payroll (net)"
+          value={formatCurrency(stats.payrollNet, currency)}
+          sub="approved & paid runs"
+          icon={Banknote}
+        />
+        <GroupKpiCard
+          label="Emails"
+          value={stats.emailsInPeriod}
+          sub={`last ${periodDays}d`}
+          icon={Mail}
         />
       </div>
 
