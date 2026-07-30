@@ -177,7 +177,7 @@ app.use(
 | call this API. Now restricted to an explicit allowlist from .env:
 |   CORS_ORIGINS=http://localhost:5173,https://crm.osgroup.com
 */
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173" || "https://production-project-coral.vercel.app")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
