@@ -117,6 +117,17 @@
     box-shadow: var(--shadow-sm);
   }
 
+  /* Hides the scrollbar visually while keeping the element scrollable.
+     Used on horizontally-scrolling tab/pill strips so overflow doesn't
+     show a chunky native scrollbar track. */
+  .no-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* old Edge/IE */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Chromium Edge */
+  }
+
   .input {
     width: 100%;
     padding: 7px 12px;
@@ -196,7 +207,24 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 20px;
+    padding: 18px 16px;
+    /* Prevent the card itself from overflowing its grid column */
+    min-width: 0;
+    overflow: hidden;
+    /* Make this a container so cqw units work for the value text */
+    container-type: inline-size;
+  }
+
+  /* Value text: fluid size — big when short, smaller when long */
+  .stat-card-value {
+    /* clamp(min, preferred, max):
+       - never smaller than 15px
+       - prefers 4.5% of the card's own width (fluid)
+       - never bigger than 24px                         */
+    font-size: clamp(15px, 4.5cqw, 24px);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
   }
 
   /* Kanban */

@@ -1,3 +1,19 @@
+/*
+ * react-refresh/only-export-components is disabled for this file alone.
+ *
+ * The rule keeps Fast Refresh working by insisting a module export
+ * only components. This is the router: its whole purpose is to export
+ * `router`, a non-component, alongside the lazy() component references
+ * and the small S/G/PageLoader render helpers. That combination is
+ * exactly what the rule forbids, and it accounted for 71 of the
+ * project's lint errors from this one file.
+ *
+ * Nothing here is a runtime problem — the cost is that editing this
+ * file triggers a full reload instead of a hot update, which is the
+ * correct behaviour for a route table anyway, since route changes need
+ * remounting to take effect.
+ */
+/* eslint-disable react-refresh/only-export-components */
 import { createBrowserRouter } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ProtectedRoute from "./ProtectedRoute";
@@ -48,6 +64,9 @@ const EmployeeEdit = lazy(() => import("@/pages/hr/employees/EmployeeEdit"));
 const AttendanceLogs = lazy(
   () => import("@/pages/hr/attendance/AttendanceLogs"),
 );
+const AttendanceRegister = lazy(
+  () => import("@/pages/hr/attendance/AttendanceRegister"),
+);
 const Holidays = lazy(
   () => import("@/pages/hr/attendance/Holidays"),
 );
@@ -91,6 +110,13 @@ const TicketsList = lazy(() => import("@/pages/support/TicketsList"));
 const SupportEdit = lazy(() => import("@/pages/support/SupportEdit"));
 const SupportDetail = lazy(() => import("@/pages/support/SupportDetail"));
 const Analytics = lazy(() => import("@/pages/reports/Analytics"));
+
+// ── Group Console ────────────────────────────────────────────
+// Parent-company oversight of every company below it in the hierarchy.
+const GroupOverview = lazy(() => import("@/pages/group/GroupOverview"));
+const GroupActivity = lazy(() => import("@/pages/group/GroupActivity"));
+const GroupCompanies = lazy(() => import("@/pages/group/GroupCompanies"));
+const GroupCompanyDetail = lazy(() => import("@/pages/group/GroupCompanyDetail"));
 const Settings = lazy(() => import("@/pages/settings/Settings"));
 const UserDetails = lazy(() => import("@/pages/settings/users/UserDetails"));
 const UserEdit = lazy(() => import("@/pages/settings/users/UserEdit"));
@@ -102,11 +128,6 @@ const ProfileSettings = lazy(() => import("@/pages/settings/ProfileSettings"));
 const Calendar = lazy(() => import("@/pages/calendar/Calendar"));
 
 // ── Email ─────────────────────────────────────────────────────
-// Aliased where the default export name collides with an existing
-// page (email/Dashboard.jsx and email/Settings.jsx both export a
-// component whose *internal* name shadows dashboard/Dashboard and
-// reports/Analytics — the import alias below is what matters, not
-// the function's own name).
 const EmailDashboard = lazy(() => import("@/pages/email/Dashboard"));
 const EmailInbox = lazy(() => import("@/pages/email/Inbox"));
 const EmailCompose = lazy(() => import("@/pages/email/Compose"));
@@ -133,20 +154,6 @@ function S({ children }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
 }
 
-/*
-|--------------------------------------------------------------------------
-| G — guarded page helper
-|--------------------------------------------------------------------------
-| Wraps a lazy page in both the permission guard and the Suspense
-| boundary, so each route stays a one-liner instead of four nested tags.
-|
-|   element: G('leads.view', <LeadsList />)
-|
-| Without this, ProtectedRoute (a bare "is there a token?" check) was the
-| only guard in the whole application, and every page — Settings, Payroll,
-| Finance, Users — was reachable just by typing the URL. RoleGuard.jsx
-| existed but was never imported anywhere.
-*/
 function G(permission, element) {
   return (
     <PermissionGuard permission={permission}>
@@ -204,13 +211,8 @@ export const router = createBrowserRouter([
       {
         element: <AppShell />,
         children: [
-          {
-            path: "/",
-            element: G("dashboard.view", <Dashboard />),
-          },
+          { path: "/", element: G("dashboard.view", <Dashboard />) },
 
-          // Everyone can see their own notifications, so this one is
-          // intentionally left ungated.
           {
             path: "/notifications",
             element: (
@@ -220,261 +222,93 @@ export const router = createBrowserRouter([
             ),
           },
 
-          // NOTE: /calendar used to sit OUTSIDE ProtectedRoute, at the
-          // top level of this file — meaning it rendered for anyone,
-          // logged in or not. Moved inside and gated.
-          {
-            path: "/calendar",
-            element: G("calendar.view", <Calendar />),
-          },
+          { path: "/calendar", element: G("calendar.view", <Calendar />) },
 
           // ── CRM ───────────────────────────────────────────
-          {
-            path: "/crm/leads",
-            element: G("leads.view", <LeadsList />),
-          },
-          {
-            path: "/crm/leads/kanban",
-            element: G("leads.view", <LeadKanban />),
-          },
-          {
-            path: "/crm/leads/:id",
-            element: G("leads.view", <LeadDetail />),
-          },
-          {
-            path: "/crm/leads/:id/edit",
-            element: G("leads.update", <LeadEdit />),
-          },
+          { path: "/crm/leads", element: G("leads.view", <LeadsList />) },
+          { path: "/crm/leads/kanban", element: G("leads.view", <LeadKanban />) },
+          { path: "/crm/leads/:id", element: G("leads.view", <LeadDetail />) },
+          { path: "/crm/leads/:id/edit", element: G("leads.update", <LeadEdit />) },
 
-          {
-            path: "/crm/accounts",
-            element: G("accounts.view", <AccountsList />),
-          },
-          {
-            path: "/crm/accounts/:id",
-            element: G("accounts.view", <AccountDetail />),
-          },
-          {
-            path: "/crm/accounts/:id/edit",
-            element: G("accounts.update", <AccountEdit />),
-          },
+          { path: "/crm/accounts", element: G("accounts.view", <AccountsList />) },
+          { path: "/crm/accounts/:id", element: G("accounts.view", <AccountDetail />) },
+          { path: "/crm/accounts/:id/edit", element: G("accounts.update", <AccountEdit />) },
 
-          {
-            path: "/crm/contacts",
-            element: G("contacts.view", <ContactsList />),
-          },
-          {
-            path: "/crm/contacts/:id/edit",
-            element: G("contacts.update", <ContactEdit />),
-          },
+          { path: "/crm/contacts", element: G("contacts.view", <ContactsList />) },
+          { path: "/crm/contacts/:id/edit", element: G("contacts.update", <ContactEdit />) },
 
-          {
-            path: "/crm/opportunities",
-            element: G("opportunities.view", <OpportunitiesList />),
-          },
-          {
-            path: "/crm/opportunities/kanban",
-            element: G("opportunities.view", <OpportunityKanban />),
-          },
-          {
-            path: "/crm/opportunities/:id",
-            element: G("opportunities.view", <OpportunityDetail />),
-          },
-          {
-            path: "/crm/opportunities/:id/edit",
-            element: G("opportunities.update", <OpportunityEdit />),
-          },
+          { path: "/crm/opportunities", element: G("opportunities.view", <OpportunitiesList />) },
+          { path: "/crm/opportunities/kanban", element: G("opportunities.view", <OpportunityKanban />) },
+          { path: "/crm/opportunities/:id", element: G("opportunities.view", <OpportunityDetail />) },
+          { path: "/crm/opportunities/:id/edit", element: G("opportunities.update", <OpportunityEdit />) },
 
           // ── HR ────────────────────────────────────────────
-          {
-            path: "/hr/employees",
-            element: G("employees.view", <EmployeesList />),
-          },
-          {
-            path: "/hr/employees/:id",
-            element: G("employees.view", <EmployeeDetail />),
-          },
-          {
-            path: "/hr/employees/:id/edit",
-            element: G("employees.update", <EmployeeEdit />),
-          },
-          {
-            path: "/hr/attendance",
-            element: G("attendance.view", <AttendanceLogs />),
-          },
+          { path: "/hr/employees", element: G("employees.view", <EmployeesList />) },
+          { path: "/hr/employees/:id", element: G("employees.view", <EmployeeDetail />) },
+          { path: "/hr/employees/:id/edit", element: G("employees.update", <EmployeeEdit />) },
+          { path: "/hr/attendance", element: G("attendance.view", <AttendanceLogs />) },
+          { path: "/hr/attendance/register", element: G("attendance.view", <AttendanceRegister />) },
+          { path: "/hr/attendance/holidays", element: G("attendance.view", <Holidays />) },
+          { path: "/hr/shifts", element: G("attendance.view", <ShiftsPage />) },
 
-          {
-            path: "/hr/attendance/holidays",
-            element: G("attendance.view", <Holidays />),
-          },
-          {
-            path: "/hr/shifts",
-            element: G("attendance.view", <ShiftsPage />),
-          },
-
-
-          {
-            path: "/hr/leaves",
-            element: G("leave.view", <LeaveRequests />),
-          },
-          {
-            path: "/hr/leaves/:id/edit",
-            element: G("leave.update", <LeaveEdit />),
-          },
-          {
-            path: "/hr/payroll",
-            element: G("payroll.view", <PayrollRuns />),
-          },
+          { path: "/hr/leaves", element: G("leave.view", <LeaveRequests />) },
+          { path: "/hr/leaves/:id/edit", element: G("leave.update", <LeaveEdit />) },
+          { path: "/hr/payroll", element: G("payroll.view", <PayrollRuns />) },
 
           // ── Finance ───────────────────────────────────────
-          {
-            path: "/finance",
-            element: G("finance.view", <FinanceOverview />),
-          },
-          {
-            path: "/finance/expenses",
-            element: G("expenses.view", <ExpensesList />),
-          },
-          {
-            path: "/finance/ledger",
-            element: G("ledger.view", <GeneralLedger />),
-          },
-          {
-            path: "/finance/expenses/:id",
-            element: G("expenses.view", <ExpenseDetails />),
-          },
-          {
-            path: "/finance/expenses/:id/edit",
-            element: G("expenses.update", <EditExpense />),
-          },
+          { path: "/finance", element: G("finance.view", <FinanceOverview />) },
+          { path: "/finance/expenses", element: G("expenses.view", <ExpensesList />) },
+          { path: "/finance/ledger", element: G("ledger.view", <GeneralLedger />) },
+          { path: "/finance/expenses/:id", element: G("expenses.view", <ExpenseDetails />) },
+          { path: "/finance/expenses/:id/edit", element: G("expenses.update", <EditExpense />) },
 
           // ── Inventory ─────────────────────────────────────
-          {
-            path: "/inventory",
-            element: G("inventory.view", <ItemsList />),
-          },
-          {
-            path: "/inventory/warehouses",
-            element: G("warehouse.view", <Warehouses />),
-          },
-          {
-            path: "/inventory/assets",
-            element: G("assets.view", <Assets />),
-          },
-          {
-            path: "/inventory/transfers",
-            element: G("transfers.view", <StockTransfers />),
-          },
-          {
-            path: "/inventory/adjustments",
-            element: G("adjustments.view", <StockAdjustments />),
-          },
+          { path: "/inventory", element: G("inventory.view", <ItemsList />) },
+          { path: "/inventory/warehouses", element: G("warehouse.view", <Warehouses />) },
+          { path: "/inventory/assets", element: G("assets.view", <Assets />) },
+          { path: "/inventory/transfers", element: G("transfers.view", <StockTransfers />) },
+          { path: "/inventory/adjustments", element: G("adjustments.view", <StockAdjustments />) },
 
           // ── Procurement ───────────────────────────────────
-          {
-            path: "/procurement",
-            element: G("procurement.view", <PurchaseOrders />),
-          },
-          {
-            path: "/procurement/orders/:id",
-            element: G("procurement.view", <PurchaseDetails />),
-          },
-          {
-            path: "/procurement/orders/:id/edit",
-            element: G("procurement.update", <PurchaseEdit />),
-          },
+          { path: "/procurement", element: G("procurement.view", <PurchaseOrders />) },
+          { path: "/procurement/orders/:id", element: G("procurement.view", <PurchaseDetails />) },
+          { path: "/procurement/orders/:id/edit", element: G("procurement.update", <PurchaseEdit />) },
 
           // ── Projects ──────────────────────────────────────
-          {
-            path: "/projects",
-            element: G("projects.view", <ProjectsList />),
-          },
-          {
-            path: "/projects/:id",
-            element: G("projects.view", <ProjectDetail />),
-          },
-          {
-            path: "/projects/:id/edit",
-            element: G("projects.update", <ProjectEdit />),
-          },
+          { path: "/projects", element: G("projects.view", <ProjectsList />) },
+          { path: "/projects/:id", element: G("projects.view", <ProjectDetail />) },
+          { path: "/projects/:id/edit", element: G("projects.update", <ProjectEdit />) },
 
           // ── Support ───────────────────────────────────────
-          {
-            path: "/support",
-            element: G("support.view", <TicketsList />),
-          },
-          {
-            path: "/support/:id",
-            element: G("support.view", <SupportDetail />),
-          },
-          {
-            path: "/support/:id/edit",
-            element: G("support.update", <SupportEdit />),
-          },
+          { path: "/support", element: G("support.view", <TicketsList />) },
+          { path: "/support/:id", element: G("support.view", <SupportDetail />) },
+          { path: "/support/:id/edit", element: G("support.update", <SupportEdit />) },
 
           // ── Reports ───────────────────────────────────────
-          {
-            path: "/reports",
-            element: G("analytics.view", <Analytics />),
-          },
+          { path: "/reports", element: G("analytics.view", <Analytics />) },
+
+          // ── Group Console ─────────────────────────────────
+          { path: "/group", element: G("group.view", <GroupOverview />) },
+          { path: "/group/activity", element: G("group.view", <GroupActivity />) },
+          { path: "/group/structure", element: G("group.view", <GroupCompanies />) },
+          { path: "/group/companies/:id", element: G("group.view", <GroupCompanyDetail />) },
 
           // ── Email ─────────────────────────────────────────
-          {
-            path: "/email",
-            element: G("email.view", <EmailDashboard />),
-          },
-          {
-            path: "/email/inbox",
-            element: G("email.view", <EmailInbox />),
-          },
-          {
-            path: "/email/compose",
-            element: G("email.create", <EmailCompose />),
-          },
-          {
-            path: "/email/sent",
-            element: G("email.view", <EmailSent />),
-          },
-          {
-            path: "/email/drafts",
-            element: G("email.view", <EmailDrafts />),
-          },
-          {
-            path: "/email/archive",
-            element: G("email.view", <EmailArchive />),
-          },
-          {
-            path: "/email/spam",
-            element: G("email.view", <EmailSpam />),
-          },
-          {
-            path: "/email/starred",
-            element: G("email.view", <EmailStarred />),
-          },
-          {
-            path: "/email/trash",
-            element: G("email.view", <EmailTrash />),
-          },
-          {
-            path: "/email/templates",
-            element: G("email.view", <EmailTemplates />),
-          },
-          {
-            path: "/email/analytics",
-            element: G("email.view", <EmailAnalytics />),
-          },
-          {
-            path: "/email/settings",
-            element: G("email.update", <EmailSettings />),
-          },
+          { path: "/email", element: G("email.view", <EmailDashboard />) },
+          { path: "/email/inbox", element: G("email.view", <EmailInbox />) },
+          { path: "/email/compose", element: G("email.create", <EmailCompose />) },
+          { path: "/email/sent", element: G("email.view", <EmailSent />) },
+          { path: "/email/drafts", element: G("email.view", <EmailDrafts />) },
+          { path: "/email/archive", element: G("email.view", <EmailArchive />) },
+          { path: "/email/spam", element: G("email.view", <EmailSpam />) },
+          { path: "/email/starred", element: G("email.view", <EmailStarred />) },
+          { path: "/email/trash", element: G("email.view", <EmailTrash />) },
+          { path: "/email/templates", element: G("email.view", <EmailTemplates />) },
+          { path: "/email/analytics", element: G("email.view", <EmailAnalytics />) },
+          { path: "/email/settings", element: G("email.update", <EmailSettings />) },
 
           // ── Settings ──────────────────────────────────────
-          {
-            path: "/settings",
-            element: G("settings.view", <Settings />),
-          },
-
-          // Editing your own profile needs no permission.
+          { path: "/settings", element: G("settings.view", <Settings />) },
           {
             path: "/settings/profile",
             element: (
@@ -483,15 +317,8 @@ export const router = createBrowserRouter([
               </S>
             ),
           },
-
-          {
-            path: "/settings/users/:id",
-            element: G("users.view", <UserDetails />),
-          },
-          {
-            path: "/settings/users/:id/edit",
-            element: G("users.update", <UserEdit />),
-          },
+          { path: "/settings/users/:id", element: G("users.view", <UserDetails />) },
+          { path: "/settings/users/:id/edit", element: G("users.update", <UserEdit />) },
         ],
       },
     ],

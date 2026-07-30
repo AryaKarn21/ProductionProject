@@ -44,6 +44,26 @@ AuditLog.init({
   // Groups every audit row produced by a single login session so an
   // investigator can replay one session end to end.
   sessionId:  { type: DataTypes.STRING, allowNull: true },
+
+  // ──────────────────────────────────────────────────────────────
+  // Group oversight (models/auditHooks.js)
+  // ──────────────────────────────────────────────────────────────
+
+  // A human-readable name for the audited record ("Acme Trading",
+  // "Sita Sharma"), captured at write time. Without it the group
+  // activity feed can only show a UUID — and the record it points at
+  // may since have been renamed or deleted, so it cannot be looked up
+  // after the fact.
+  resourceLabel: { type: DataTypes.STRING, allowNull: true },
+
+  // 'auto'   — written by the global Sequelize hooks
+  // 'route'  — written explicitly by a route via logFromRequest()
+  // Lets the Group Console prefer the richer hand-written entry when
+  // both exist, and lets an operator tell the two apart.
+  source: {
+    type: DataTypes.ENUM('auto', 'route'),
+    defaultValue: 'route',
+  },
 }, {
   sequelize,
   modelName: 'AuditLog',

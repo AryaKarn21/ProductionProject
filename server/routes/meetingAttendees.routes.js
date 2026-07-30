@@ -1,6 +1,7 @@
 import express from "express";
 import { Meeting, MeetingAttendee, User } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
+import { sendMeetingInviteEmail } from "../services/emailNotification.service.js";
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.post("/:meetingId/attendees", protect, async (req, res) => {
         companyId: req.companyId,
         isDeleted: false,
       },
+      include: [{ model: User, as: "organizer", attributes: ["id", "name", "email"] }],
     });
 
     console.log("Meeting:", meeting);
@@ -56,6 +58,22 @@ router.post("/:meetingId/attendees", protect, async (req, res) => {
       console.log("Created:", attendee);
 
       attendees.push(attendee);
+
+      // Best-effort: a bad SMTP config or one invalid email address
+      // shouldn't roll back attendees who were already added successfully,
+      // so failures here are logged, not thrown.
+      if (user.email) {
+        sendMeetingInviteEmail({
+          to: user.email,
+          recipientName: user.name,
+          meeting,
+          organizer: meeting.organizer
+            ? { name: meeting.organizer.name, email: meeting.organizer.email }
+            : undefined,
+        }).catch((err) =>
+          console.error(`Meeting invite email failed for ${user.email}:`, err.message)
+        );
+      }
     }
 
     res.status(201).json({

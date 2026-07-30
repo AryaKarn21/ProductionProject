@@ -1,4 +1,3 @@
-import { Op } from "sequelize";
 import transporter from "../config/mail.js";
 
 // NOTE: the actual file on disk is `Emailmodels.js` (lowercase "m"). The
@@ -10,7 +9,6 @@ import transporter from "../config/mail.js";
 // this file. `models/index.js` has the exact same typo and should be fixed
 // the same way if you're deploying to Linux.
 import {
-  Email,
   EmailAccount,
   EmailThread,
   EmailAttachment,
@@ -57,7 +55,11 @@ export async function sendEmail({ to, subject, html, text, cc, bcc, attachments 
 | so it no longer breaks module loading.
 */
 
-const baseQuery = (companyId) => ({
+// Prefixed with an underscore to mark it as intentionally unused. The
+// comment above records a deliberate decision to keep it, so deleting
+// it to satisfy the linter would throw away that intent; the prefix
+// says "unused on purpose" in a way the tooling understands.
+const _baseQuery = (companyId) => ({
   where: {
     companyId,
   },

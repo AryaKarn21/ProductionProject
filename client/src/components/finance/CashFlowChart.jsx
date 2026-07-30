@@ -1,4 +1,5 @@
 import Chart from "react-apexcharts";
+import { formatCurrency } from "@/lib/utils";
 
 export default function CashFlowChart({ data = [] }) {
   const cashFlow = data.map(
@@ -13,8 +14,8 @@ export default function CashFlowChart({ data = [] }) {
     dataLabels: { enabled: false },
     grid: { borderColor: "#e5e7eb", strokeDashArray: 4 },
     xaxis: { categories: data.map((item) => item.month) },
-    yaxis: { labels: { formatter: (value) => `$${value.toLocaleString()}` } },
-    tooltip: { y: { formatter: (value) => `$${value.toLocaleString()}` } },
+    yaxis: { labels: { formatter: (value) => formatCurrency(value) } },
+    tooltip: { y: { formatter: (value) => formatCurrency(value) } },
   };
 
   const series = [{ name: "Cash Flow", data: cashFlow }];

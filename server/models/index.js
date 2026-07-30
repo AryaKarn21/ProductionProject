@@ -10,6 +10,8 @@ import Lead from "./Lead.js";
 import LeadNote from "./LeadNote.js";
 import Employee from "./Employee.js";
 import EmployeeDocument from "./EmployeeDocument.js";
+import EmployeeEducation from "./EmployeeEducation.js";
+import EmployeeExperience from "./EmployeeExperience.js";
 import PerformanceReview from "./PerformanceReview.js";
 import Attendance from "./Attendance.js";
 import Shift from "./Shift.js";
@@ -41,7 +43,6 @@ import NotificationPreference from "./NotificationPreference.js";
 import DailyReport from "./DailyReport.js";
 // Email module — models + associations live in EmailModels.js
 import {
-  emailmodels,
   EmailAccount,
   EmailThread,
   Email,
@@ -221,6 +222,37 @@ Employee.hasMany(EmployeeDocument, {
   foreignKey: "employeeId",
 });
 EmployeeDocument.belongsTo(Employee, { foreignKey: "employeeId" });
+
+/*
+ * Education and past employment.
+ *
+ * onDelete CASCADE on both: these rows describe one person and have no
+ * meaning without them. Leaving them behind after the employee is
+ * deleted would orphan the data and leak a former employee's salary
+ * history and referee contacts into a table nobody is looking at.
+ *
+ * The aliases matter — routes include these as "educations" and
+ * "experiences", and a missing or mismatched alias is what produced the
+ * "Employee is not associated to X using alias" errors elsewhere in
+ * this file.
+ */
+Employee.hasMany(EmployeeEducation, {
+  as: "educations",
+  foreignKey: "employeeId",
+  onDelete: "CASCADE",
+});
+EmployeeEducation.belongsTo(Employee, { foreignKey: "employeeId" });
+
+Employee.hasMany(EmployeeExperience, {
+  as: "experiences",
+  foreignKey: "employeeId",
+  onDelete: "CASCADE",
+});
+EmployeeExperience.belongsTo(Employee, { foreignKey: "employeeId" });
+
+// Who signed off the verification, for both tables.
+EmployeeEducation.belongsTo(User, { as: "verifiedBy", foreignKey: "verifiedById" });
+EmployeeExperience.belongsTo(User, { as: "verifiedBy", foreignKey: "verifiedById" });
 Employee.hasMany(Payslip, { as: "payslips", foreignKey: "employeeId" });
 Employee.hasMany(Leave, { as: "leaves", foreignKey: "employeeId" });
 Employee.hasMany(Attendance, {
@@ -545,6 +577,16 @@ const allModels = [
 ];
 allModels.forEach(withMongoCompatJSON);
 
+// Every create/update/delete on a business model now writes an audit row
+// automatically. Registered last, after all models and associations
+// exist, so the hooks see the finished registry.
+//
+// This is what gives the parent company visibility into its child
+// companies: previously only 9 of 28 route files logged anything, so
+// most of what a child company did left no record at all.
+import { registerAuditHooks } from "./auditHooks.js";
+registerAuditHooks();
+
 export {
   Company,
   User,
@@ -559,6 +601,8 @@ export {
   LeadNote,
   Employee,
   EmployeeDocument,
+  EmployeeEducation,
+  EmployeeExperience,
   Attendance,
   Shift,
   Leave,

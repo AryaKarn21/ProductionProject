@@ -11,4 +11,5 @@ export const attendanceAPI = {
   updateShift: (id, data) => api.patch(`/attendance/shifts/${id}`, data),
   deleteShift: (id) => api.delete(`/attendance/shifts/${id}`),
   getSummary: (params) => api.get('/attendance/summary', { params }),
+  getRegister: (params) => api.get('/attendance/register', { params }),
 }

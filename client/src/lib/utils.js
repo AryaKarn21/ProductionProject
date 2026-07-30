@@ -38,6 +38,27 @@ export function formatDate(dateValue, formatStr = 'PPP') {
   return format(date, formatStr)
 }
 
+// Resolves a relative path like "/uploads/avatars/xxx.png" (returned by
+// your API) into a full URL pointing at the API server, since the API and
+// the frontend live on different domains in production.
+function getApiOrigin() {
+  const apiUrl = import.meta.env.VITE_API_URL || ''
+  try {
+    return new URL(apiUrl, window.location.origin).origin
+  } catch {
+    return ''
+  }
+}
+
+export function getFileUrl(path) {
+  if (!path) return path
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:') || path.startsWith('blob:')) {
+    return path // already a full URL, leave it alone
+  }
+  const origin = getApiOrigin()
+  return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+}
+
 // Get user initials for avatars
 export function getInitials(name = '') {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()

@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, CheckSquare, Square } from 'lucide-react'
+import { ArrowLeft, CheckSquare, Square } from 'lucide-react'
 import { projectsAPI } from '@/api/projects.api'
 import { Tabs } from '@/components/ui/Tabs'
 import Badge from '@/components/ui/Badge'
 import Avatar from '@/components/ui/Avatar'
 import { formatDate, formatCurrency, classifyStatus } from '@/lib/utils'
-import toast from 'react-hot-toast'
 
 export default function ProjectDetail() {
   const { id } = useParams()

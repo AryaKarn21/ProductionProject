@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 
 import { supportAPI } from '@/api/support.api'
@@ -20,19 +20,15 @@ export default function SupportDetail() {
     queryFn: () => supportAPI.getTicketById(id).then(res => res.data),
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: supportAPI.deleteTicket,
-
-    onSuccess: () => {
-      toast.success('Ticket deleted')
-
-      queryClient.invalidateQueries({
-        queryKey: ['tickets'],
-      })
-
-      navigate('/support')
-    },
-  })
+  /*
+   * A `deleteMutation` used to sit here. It referenced `toast` and
+   * `queryClient`, neither of which this file imported or created — but
+   * nothing ever called it, so it never threw. There is no delete
+   * control on this page; the ticket list owns deletion.
+   *
+   * Removed rather than wired to a new button: adding a destructive
+   * action nobody asked for is not a lint fix.
+   */
 
   if (isLoading) {
     return <div className="p-6">Loading...</div>

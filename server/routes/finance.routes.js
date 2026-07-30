@@ -8,6 +8,7 @@ import { generateExpensePDF } from "../reports/expenseReport.js";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router();
 const getCompany = (req) => req.companyId;
@@ -223,7 +224,7 @@ router.post("/expenses", protect, async (req, res, next) => {
 // ── Expenses: update ──────────────────────────────────────
 router.patch("/expenses/:id", protect, async (req, res, next) => {
   try {
-    const expense = await Expense.findByPk(req.params.id);
+    const expense = await findInScope(req, Expense, req.params.id);
     if (!expense) return res.status(404).json({ message: "Expense not found" });
     await expense.update(req.body);
     res.json(expense);
@@ -235,7 +236,9 @@ router.patch("/expenses/:id", protect, async (req, res, next) => {
 // ── Expenses: delete ──────────────────────────────────────
 router.delete("/expenses/:id", protect, async (req, res, next) => {
   try {
-    await Expense.destroy({ where: { id: req.params.id } });
+    const expense = await findInScope(req, Expense, req.params.id);
+    if (!expense) return res.status(404).json({ message: "Expense not found" });
+    await expense.destroy();
     res.json({ message: "Expense deleted" });
   } catch (err) {
     next(err);
@@ -245,7 +248,7 @@ router.delete("/expenses/:id", protect, async (req, res, next) => {
 // ── Expenses: approve / reject ────────────────────────────
 router.patch("/expenses/:id/approve", protect, async (req, res, next) => {
   try {
-    const expense = await Expense.findByPk(req.params.id);
+    const expense = await findInScope(req, Expense, req.params.id);
     if (!expense) return res.status(404).json({ message: "Expense not found" });
     await expense.update({ status: "approved", approvedById: req.user.id, approvedAt: new Date() });
     res.json(expense);
@@ -256,7 +259,7 @@ router.patch("/expenses/:id/approve", protect, async (req, res, next) => {
 
 router.patch("/expenses/:id/reject", protect, async (req, res, next) => {
   try {
-    const expense = await Expense.findByPk(req.params.id);
+    const expense = await findInScope(req, Expense, req.params.id);
     if (!expense) return res.status(404).json({ message: "Expense not found" });
 
     await expense.update({ status: "rejected", rejectionReason: req.body.reason });
@@ -302,7 +305,7 @@ router.get("/expenses/:id/receipt/download", protect, async (req, res, next) => 
 
 router.get("/expenses/:id/download", protect, async (req, res, next) => {
   try {
-    const expense = await Expense.findByPk(req.params.id);
+    const expense = await findInScope(req, Expense, req.params.id);
     if (!expense) return res.status(404).json({ message: "Expense not found" });
 
     if (req.user.role !== "super_admin" && expense.companyId !== req.companyId) {
@@ -343,7 +346,7 @@ router.post("/expenses/:id/receipt", protect, uploadReceipt.single("receipt"), a
 
 router.delete("/expenses/:id/receipt", protect, async (req, res, next) => {
   try {
-    const expense = await Expense.findByPk(req.params.id);
+    const expense = await findInScope(req, Expense, req.params.id);
     if (!expense) return res.status(404).json({ message: "Expense not found" });
 
     if (expense.receipt) {

@@ -8,6 +8,8 @@ import {
   finalizeAbsencesForDate,
   finalizeAbsencesForRange,
 } from "../services/attendanceFinalization.service.js";
+import { buildAttendanceRegister } from "../services/attendanceRegister.service.js";
+import { findInScope } from '../utils/scope.js'
 const router = express.Router();
 
 const getCompany = (req) => req.companyId || req.headers['x-company-id'] || req.headers['x-company-id'] || req.get('X-Company-ID');
@@ -266,7 +268,7 @@ router.patch("/:id", protect, async (req, res, next) => {
       });
     }
 
-    const record = await Attendance.findByPk(req.params.id);
+    const record = await findInScope(req, Attendance, req.params.id);
 
     if (!record) {
       return res.status(404).json({
@@ -363,6 +365,40 @@ router.get("/shifts", protect, (req, res) =>
   ]),
 );
 
+// ─────────────────────────────────────────────────────────────
+// GET /api/attendance/register
+//
+// Standard employee × day attendance register, spanning `months`
+// calendar months ending at `endMonth` (default: this month and last
+// month — 2 months). One row per employee, one column per day, a
+// short status code per cell (P/LT/HD/A/H/LV/WO), plus per-employee
+// totals and an attendance percentage.
+//
+// Query: endMonth=YYYY-MM (default current month), months=1..6 (default 2),
+//        department, employeeId
+// ─────────────────────────────────────────────────────────────
+router.get("/register", protect, async (req, res, next) => {
+  try {
+    const companyId = getCompany(req);
+    if (!companyId) {
+      return res.status(400).json({ message: "Company not found" });
+    }
+
+    const { endMonth, months, department, employeeId } = req.query;
+
+    const register = await buildAttendanceRegister(companyId, {
+      endMonth,
+      months,
+      department,
+      employeeId,
+    });
+
+    res.json(register);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get("/summary", protect, async (req, res, next) => {
   try {
     const companyId = getCompany(req);
@@ -395,7 +431,7 @@ router.delete("/:id", protect, async (req, res, next) => {
       });
     }
 
-    const record = await Attendance.findByPk(req.params.id);
+    const record = await findInScope(req, Attendance, req.params.id);
 
     if (!record) {
       return res.status(404).json({

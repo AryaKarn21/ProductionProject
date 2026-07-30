@@ -5,8 +5,40 @@ import { authorize, authorizePermission, invalidateRoleCache } from '../middlewa
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
 import { ALL_PERMISSION_KEYS, normalizePermissions } from '../config/permissions.js'
+import { getRoleScopeIds } from '../utils/companyTree.js'
+import { requireParentSuperAdmin } from '../middleware/companyRank.js'
 
 const router = express.Router()
+
+/*
+|--------------------------------------------------------------------------
+| Who may CHANGE a role, and who may READ one
+|--------------------------------------------------------------------------
+|
+| Every WRITE route below carries requireParentSuperAdmin: creating,
+| editing, cloning, activating, deleting or restoring a role is a
+| parent-company act. A child company inherits the group's roles; it does
+| not author its own.
+|
+| The READ routes (GET /, /stats, /permission-catalog, /:id) are
+| deliberately LEFT ALONE, and that is not an oversight:
+|
+|   1. The user forms need them. UserFormModal and UserEdit populate
+|      their role dropdown from GET /roles. A child-company admin who
+|      holds users.create must be able to pick a role for the person they
+|      are adding — blocking the read would leave that dropdown empty and
+|      break user management for every child company.
+|
+|   2. Role inheritance depends on it. readScopeWhere() resolves a
+|      company's own roles PLUS its ancestors', which is what lets OS
+|      Group define Administrator/Manager/Accountant once instead of
+|      every subsidiary redefining all four. Closing the read would
+|      disable that feature.
+|
+| The reads are already tenant-scoped, so a child company sees only its
+| own roles and the ones it inherits — never a sibling's. What it can no
+| longer do is change any of them.
+*/
 
 /*
 |--------------------------------------------------------------------------
@@ -36,6 +68,33 @@ const pick = (source, allowed) =>
 const scopeWhere = (req, extra = {}) => {
   const where = { ...extra }
   if (req.companyId) where.companyId = req.companyId
+  return where
+}
+
+/*
+| readScopeWhere — the same thing, widened to INHERITED roles.
+|
+| Roles are defined once by the group parent (OS Group owns
+| Administrator, Manager, Accountant and Employee) and held by users
+| across every company beneath it — 12 of 17 users on this deployment
+| hold a role owned by a company other than their own.
+|
+| With the strict scope above, those roles were invisible from any
+| child company: the Roles screen listed only locally-owned roles, so
+| an admin could not see, let alone reassign, the role most of their
+| users actually held.
+|
+| Inheritance is strictly UPWARD — own company plus ancestors, never a
+| sibling — and this is used ONLY on read paths. Every mutating path
+| (update, delete, activate, restore, clone-source, bulk, name
+| uniqueness) deliberately keeps using scopeWhere(), so a subsidiary
+| can USE the group's roles but can never edit or delete them.
+*/
+const readScopeWhere = async (req, extra = {}) => {
+  const where = { ...extra }
+  if (req.companyId) {
+    where.companyId = { [Op.in]: await getRoleScopeIds(req.companyId) }
+  }
   return where
 }
 
@@ -139,7 +198,7 @@ router.get('/', authorizePermission('roles.view'), async (req, res, next) => {
     const { search = '', status, includeDeleted } = req.query
     const { page, limit, offset } = parsePagination(req)
 
-    const where = scopeWhere(req)
+    const where = await readScopeWhere(req)
     if (!includeDeleted || includeDeleted === 'false') where.isDeleted = false
     if (status === 'active') where.isActive = true
     if (status === 'inactive') where.isActive = false
@@ -177,7 +236,7 @@ router.get('/', authorizePermission('roles.view'), async (req, res, next) => {
 
 router.get('/stats', authorizePermission('roles.view'), async (req, res, next) => {
   try {
-    const where = scopeWhere(req)
+    const where = await readScopeWhere(req)
 
     const [total, active, inactive, deleted] = await Promise.all([
       Role.count({ where: { ...where, isDeleted: false } }),
@@ -228,7 +287,7 @@ router.get('/permission-catalog', authorizePermission('roles.view'), async (req,
 router.get('/:id', validateUuidParam('id'), authorizePermission('roles.view'), async (req, res, next) => {
   try {
     const role = await Role.findOne({
-      where: scopeWhere(req, { id: req.params.id }),
+      where: await readScopeWhere(req, { id: req.params.id }),
       include: [{ model: Role, as: 'parent', attributes: ['id', 'name'], required: false }],
     })
     if (!role) return res.status(404).json({ message: 'Role not found' })
@@ -249,6 +308,7 @@ router.get('/:id', validateUuidParam('id'), authorizePermission('roles.view'), a
 
 router.post(
   '/',
+  requireParentSuperAdmin,
   authorizePermission('roles.create'),
   validate({
     name: rules.string({ required: true, min: 2, max: 100 }),
@@ -307,6 +367,7 @@ router.post(
 router.patch(
   '/:id',
   validateUuidParam('id'),
+  requireParentSuperAdmin,
   authorizePermission('roles.update'),
   validate({
     name: rules.string({ min: 2, max: 100 }),
@@ -393,6 +454,7 @@ router.patch(
 router.post(
   '/:id/clone',
   validateUuidParam('id'),
+  requireParentSuperAdmin,
   authorizePermission('roles.create'),
   async (req, res, next) => {
     try {
@@ -479,10 +541,10 @@ const setActive = (isActive) => async (req, res, next) => {
   }
 }
 
-router.patch('/:id/activate', validateUuidParam('id'), authorizePermission('roles.update'), setActive(true))
-router.patch('/:id/deactivate', validateUuidParam('id'), authorizePermission('roles.update'), setActive(false))
+router.patch('/:id/activate', validateUuidParam('id'), requireParentSuperAdmin, authorizePermission('roles.update'), setActive(true))
+router.patch('/:id/deactivate', validateUuidParam('id'), requireParentSuperAdmin, authorizePermission('roles.update'), setActive(false))
 
-router.delete('/:id', validateUuidParam('id'), authorizePermission('roles.delete'), async (req, res, next) => {
+router.delete('/:id', validateUuidParam('id'), requireParentSuperAdmin, authorizePermission('roles.delete'), async (req, res, next) => {
   try {
     const role = await Role.findOne({ where: scopeWhere(req, { id: req.params.id }) })
     if (!role) return res.status(404).json({ message: 'Role not found' })
@@ -523,7 +585,7 @@ router.delete('/:id', validateUuidParam('id'), authorizePermission('roles.delete
   }
 })
 
-router.patch('/:id/restore', validateUuidParam('id'), authorizePermission('roles.update'), async (req, res, next) => {
+router.patch('/:id/restore', validateUuidParam('id'), requireParentSuperAdmin, authorizePermission('roles.update'), async (req, res, next) => {
   try {
     const role = await Role.findOne({ where: scopeWhere(req, { id: req.params.id }) })
     if (!role) return res.status(404).json({ message: 'Role not found' })
@@ -552,7 +614,7 @@ router.patch('/:id/restore', validateUuidParam('id'), authorizePermission('roles
   }
 })
 
-router.delete('/:id/permanent', validateUuidParam('id'), authorize('super_admin'), async (req, res, next) => {
+router.delete('/:id/permanent', validateUuidParam('id'), requireParentSuperAdmin, authorize('super_admin'), async (req, res, next) => {
   try {
     const role = await Role.findOne({ where: { id: req.params.id } })
     if (!role) return res.status(404).json({ message: 'Role not found' })
@@ -679,8 +741,8 @@ const bulkAction = (action) => async (req, res, next) => {
   }
 }
 
-router.post('/bulk-activate', authorizePermission('roles.update'), bulkAction('activate'))
-router.post('/bulk-deactivate', authorizePermission('roles.update'), bulkAction('deactivate'))
-router.post('/bulk-delete', authorizePermission('roles.delete'), bulkAction('delete'))
+router.post('/bulk-activate', requireParentSuperAdmin, authorizePermission('roles.update'), bulkAction('activate'))
+router.post('/bulk-deactivate', requireParentSuperAdmin, authorizePermission('roles.update'), bulkAction('deactivate'))
+router.post('/bulk-delete', requireParentSuperAdmin, authorizePermission('roles.delete'), bulkAction('delete'))
 
 export default router

@@ -9,9 +9,19 @@ import {
   Clock,
 } from "lucide-react";
 
+import { Link } from "react-router-dom";
+
 import Badge from "@/components/ui/Badge";
+import Can from "@/components/shared/Can";
+import useCompanyScope from "@/hooks/useCompanyScope";
 
 export default function ActivityCard({ user }) {
+  // The audit log is now a parent-company surface, so the link into it
+  // has to be gated the same way. Leaving it visible would send a
+  // child-company user to a Settings tab that no longer exists for
+  // them, landing them on the Users tab with no explanation.
+  const { isParentCompany } = useCompanyScope();
+
   const activities = [
     {
       icon: LogIn,
@@ -156,12 +166,25 @@ export default function ActivityCard({ user }) {
           Activity history is retained for security auditing.
         </div>
 
-        <button
-          className="text-[13px] font-medium transition-colors"
-          style={{ color: "var(--primary)" }}
-        >
-          View Full Activity Log
-        </button>
+        {/*
+          Was a button with no onClick — it rendered, looked live, and
+          did nothing when clicked.
+
+          Wrapped in <Can> because the audit log itself requires
+          auditlog.view: without the guard this would have sent an
+          ordinary employee to a tab that immediately 403s.
+        */}
+        {isParentCompany && (
+          <Can permission="auditlog.view">
+            <Link
+              to="/settings?tab=audit"
+              className="text-[13px] font-medium transition-colors hover:underline"
+              style={{ color: "var(--primary)" }}
+            >
+              View Full Activity Log
+            </Link>
+          </Can>
+        )}
       </div>
     </div>
   );

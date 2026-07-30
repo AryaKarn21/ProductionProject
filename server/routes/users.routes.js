@@ -1,6 +1,6 @@
 import express from "express";
 import { Op } from "sequelize";
-import { User, Company, Role } from "../models/index.js";
+import { User, Company } from "../models/index.js";
 import { authorizePermission } from "../middleware/auth.js";
 
 const router = express.Router();

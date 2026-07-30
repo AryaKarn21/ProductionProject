@@ -3,6 +3,7 @@ import { Op } from 'sequelize'
 import { Contact, Account, User } from '../models/index.js'
 import { protect } from '../middleware/auth.js'
 import { createNotification } from "../services/notification.service.js";
+import { findInScope } from '../utils/scope.js'
 
 const router = express.Router()
 
@@ -35,7 +36,7 @@ router.get('/', protect, async (req, res, next) => {
 
 router.get('/:id', protect, async (req, res, next) => {
   try {
-   const contact = await Contact.findByPk(req.params.id, {
+   const contact = await findInScope(req, Contact, req.params.id, {
   include: [
     {
       model: Account,
@@ -90,7 +91,7 @@ router.post("/", protect, async (req, res, next) => {
 
 router.patch("/:id", protect, async (req, res, next) => {
   try {
-    const contact = await Contact.findByPk(req.params.id);
+    const contact = await findInScope(req, Contact, req.params.id);
 
     if (!contact) {
       return res.status(404).json({
@@ -160,7 +161,7 @@ router.patch("/:id", protect, async (req, res, next) => {
 // Delete Contact
 router.delete("/:id", protect, async (req, res, next) => {
   try {
-    const contact = await Contact.findByPk(req.params.id);
+    const contact = await findInScope(req, Contact, req.params.id);
 
     if (!contact) {
       return res.status(404).json({

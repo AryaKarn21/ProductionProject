@@ -1,8 +1,9 @@
-import { Search, Sun, Moon, Plus, Command } from "lucide-react";
+import { getFileUrl } from "@/lib/utils";
+import { Search, Sun, Moon, Clock, Command } from "lucide-react";
 import { useUIStore } from "@/store/ui.store";
 import { useAuthStore } from "@/store/auth.store";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import NotificationBell from "@/components/notifications/NotificationBell";
@@ -14,8 +15,16 @@ export default function Topbar() {
 
   const queryClient = useQueryClient();
   const [profileOpen, setProfileOpen] = useState(false);
-  const navigate = useNavigate();
-  const isMobile = useIsMobile();
+const [avatarError, setAvatarError] = useState(false);
+const [now, setNow] = useState(new Date());
+const navigate = useNavigate();
+const isMobile = useIsMobile();
+
+// Live clock: tick every second, clean up the timer when Topbar unmounts
+useEffect(() => {
+  const timer = setInterval(() => setNow(new Date()), 1000);
+  return () => clearInterval(timer);
+}, []);
 
   const handleLogout = () => {
     logout();
@@ -31,7 +40,7 @@ export default function Topbar() {
   };
 
   // Get avatar URL from user object (checking common property names)
-  const avatarUrl = user?.avatarUrl || user?.avatar || user?.profileImage || user?.image;
+  const avatarUrl = getFileUrl(user?.avatarUrl || user?.avatar || user?.profileImage || user?.image);
 
   return (
     <header
@@ -86,11 +95,18 @@ export default function Topbar() {
           </select>
         )}
 
-        {/* Quick Create */}
-        <button className="btn btn-primary btn-sm px-2.5 sm:px-3">
-          <Plus size={14} />
-          <span className="hidden sm:inline">New</span>
-        </button>
+      {/* Live clock */}
+<div
+  className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] font-medium tabular-nums shrink-0"
+  style={{
+    background: "var(--surface-2)",
+    borderColor: "var(--border)",
+    color: "var(--text-secondary)",
+  }}
+>
+  <Clock size={14} />
+  {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+</div>
 
         {/* Theme toggle */}
         <button onClick={toggleTheme} className="btn btn-ghost btn-icon" title="Toggle theme">
@@ -107,15 +123,16 @@ export default function Topbar() {
             className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0 overflow-hidden"
             style={{ background: "var(--primary)" }}
           >
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={user?.name || "Profile"}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              user?.name?.[0]?.toUpperCase() || "U"
-            )}
+           {avatarUrl && !avatarError ? (
+  <img
+    src={avatarUrl}
+    alt={user?.name || "Profile"}
+    className="w-full h-full object-cover"
+    onError={() => setAvatarError(true)}
+  />
+) : (
+  user?.name?.[0]?.toUpperCase() || "U"
+)}
           </button>
 
           {profileOpen && (

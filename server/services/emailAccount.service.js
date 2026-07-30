@@ -10,9 +10,12 @@
 //   3. Updates use an explicit allow-list — no update(req.body).
 // ─────────────────────────────────────────────────────────────
 import nodemailer from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
+import { google } from "googleapis";
 import { EmailAccount } from "../models/index.js";
 import { encrypt, decrypt } from "../utils/crypto.js";
 import { sequelize } from "../config/db.js";
+import { createOAuthClient } from "./googleOAuth.service.js";
 
 // Host/port presets so users don't have to know provider settings.
 const PROVIDER_PRESETS = {
@@ -102,14 +105,74 @@ export const buildTransporter = (account) => {
     });
   }
 
-  // Legacy SMTP + app-password accounts.
+  // Legacy SMTP + app-password accounts. Explicit timeouts so a slow/blocked
+  // connection fails fast (a few seconds) instead of hanging until whatever
+  // client or platform timeout eventually gives up.
   const password = decrypt(account.encPassword);
   return nodemailer.createTransport({
     host: account.smtpHost,
     port: Number(account.smtpPort),
     secure: Boolean(account.smtpSecure),
     auth: { user: account.email, pass: password },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
+};
+
+/**
+ * Send mail for a stored account.
+ *
+ * Gmail OAuth2 accounts go through the Gmail REST API (HTTPS) instead of
+ * nodemailer's SMTP transport. Raw SMTP sockets (port 465/587) are slow and
+ * often unreliable from serverless platforms like Vercel, which are built
+ * around short-lived HTTP requests — that mismatch is what was causing
+ * sends to hang for 30+ seconds there while working fine on localhost.
+ * The Gmail API call below is a single HTTPS request, so it behaves the
+ * same in serverless as any other API call.
+ *
+ * Every other provider (legacy SMTP/app-password, Outlook, etc.) keeps
+ * using the nodemailer SMTP transporter from buildTransporter() above,
+ * since only Gmail has a first-class REST "send" endpoint we can use here.
+ */
+export const sendMailForAccount = async (account, mailOptions) => {
+  if (account.authType === "oauth2" && account.provider === "gmail") {
+    return sendViaGmailApi(account, mailOptions);
+  }
+
+  const transporter = buildTransporter(account);
+  return transporter.sendMail(mailOptions);
+};
+
+/** Build the raw RFC 2822 message (nodemailer's MailComposer handles
+ *  subject/body/attachments/MIME boundaries for us — same option shape as
+ *  transporter.sendMail), then hand it to Gmail's API as base64url. */
+const sendViaGmailApi = async (account, mailOptions) => {
+  const composer = new MailComposer(mailOptions);
+  const message = await new Promise((resolve, reject) => {
+    composer.compile().build((err, msg) => (err ? reject(err) : resolve(msg)));
+  });
+
+  const raw = message
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const oauthClient = createOAuthClient();
+  oauthClient.setCredentials({
+    refresh_token: decrypt(account.encRefreshToken),
+  });
+
+  const gmail = google.gmail({ version: "v1", auth: oauthClient });
+  const { data } = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw },
+  });
+
+  // Shape a result close enough to nodemailer's for the routes that log
+  // info.messageId — Gmail's API gives back its own message id instead.
+  return { messageId: data.id, threadId: data.threadId };
 };
 
 /** Verify SMTP credentials. Returns { ok } or { ok:false, error }. */

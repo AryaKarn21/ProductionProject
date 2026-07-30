@@ -35,7 +35,13 @@ export default function CompanySwitcher() {
               className="w-full flex items-center gap-2 px-3 py-2 text-[12px] hover:bg-white/06 transition-colors"
             >
               <Building2 size={12} className="text-[var(--sidebar-text)]" />
-              <span className={cn('flex-1 text-left truncate', activeCompany === company._id ? 'text-white' : 'text-[var(--sidebar-text)]')}>
+              {/*
+                Was comparing against `company._id`. Every other line in
+                this file — and the store — keys off `company.id`, so the
+                selected company was never highlighted: the label stayed
+                muted grey while the tick beside it was rendered.
+              */}
+              <span className={cn('flex-1 text-left truncate', activeCompany === company.id ? 'text-white' : 'text-[var(--sidebar-text)]')}>
                 {company.name}
               </span>
               {activeCompany === company.id && <Check size={12} className="text-[var(--primary)]" />}

@@ -3,11 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { List, Plus } from 'lucide-react'
 import { leadsAPI } from '@/api/leads.api'
 import KanbanBoard from '@/components/shared/KanbanBoard'
-import Badge from '@/components/ui/Badge'
 import Avatar from '@/components/ui/Avatar'
-import { formatCurrency, classifyStatus } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { LEAD_STAGES } from '@/lib/constants'
-import toast from 'react-hot-toast'
 
 export default function LeadKanban() {
   const navigate = useNavigate()

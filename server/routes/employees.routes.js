@@ -6,6 +6,8 @@ import {
   Leave,
   Attendance,
   EmployeeDocument,
+  EmployeeEducation,
+  EmployeeExperience,
   Shift,
   PerformanceReview,
   AuditLog,
@@ -387,6 +389,10 @@ router.get("/:id", protect, async (req, res, next) => {
       include: [
         { model: Employee, as: "reportingManager", attributes: ["id", "firstName", "lastName", "designation"] },
         { model: Shift, as: "shift", attributes: ["id", "name"] },
+        // Background travels with the profile so the detail page can
+        // render the Background tab without a second round trip.
+        { model: EmployeeEducation, as: "educations", separate: true, order: [["endYear", "DESC"]] },
+        { model: EmployeeExperience, as: "experiences", separate: true, order: [["startDate", "DESC"]] },
       ],
     });
 
@@ -718,7 +724,7 @@ router.post("/:id/send-email", protect, async (req, res, next) => {
         resourceId: employee.id,
         changes: { subject },
       });
-    } catch (_) {}
+    } catch { /* best-effort cleanup — failure is not fatal here */ }
 
     res.json({ message: "Email sent" });
   } catch (err) {
@@ -865,6 +871,513 @@ router.delete("/:id/documents/:docId", protect, async (req, res, next) => {
 
     await doc.destroy();
     res.json({ message: "Document removed" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
+// ═════════════════════════════════════════════════════════════
+// BACKGROUND — Education & Past Work Experience
+// ═════════════════════════════════════════════════════════════
+//
+// Two child collections hanging off one employee. Every handler below
+// loads the employee FIRST with a companyId check, then works from
+// `employee.id` — so a row can only ever be reached through a parent the
+// caller's tenant owns. Passing someone else's education UUID gets a 404
+// from the parent lookup, never a leaked row.
+
+/** Loads the employee, or null. Centralised so the tenant check cannot
+ *  be forgotten on one handler and silently open a hole. */
+const loadEmployee = (req) =>
+  Employee.findOne({ where: { id: req.params.id, companyId: req.companyId } });
+
+/*
+ * Recomputes employees.totalExperienceMonths from the experience rows.
+ *
+ * Called after every write. The column is never taken from a request
+ * body, so it cannot drift away from the rows it summarises.
+ *
+ * OVERLAPS ARE MERGED, not summed. Somebody who freelanced for two
+ * clients across the same eighteen months has eighteen months of
+ * experience, not thirty-six — summing the rows would inflate every
+ * consultant's record. The intervals are sorted and coalesced first.
+ */
+const recalcExperience = async (employee) => {
+  const rows = await EmployeeExperience.findAll({
+    where: { employeeId: employee.id },
+    attributes: ["startDate", "endDate", "isCurrent"],
+    raw: true,
+  });
+
+  const intervals = rows
+    .map((r) => {
+      const start = new Date(r.startDate);
+      // An open-ended row runs to today. A row with neither endDate nor
+      // isCurrent is treated as ending on its start date rather than
+      // running to today, so a half-filled record cannot quietly award
+      // somebody years of experience.
+      const end = r.isCurrent ? new Date() : r.endDate ? new Date(r.endDate) : start;
+      return { start, end: end < start ? start : end };
+    })
+    .filter((i) => !Number.isNaN(i.start.getTime()))
+    .sort((a, b) => a.start - b.start);
+
+  const merged = [];
+  for (const cur of intervals) {
+    const last = merged[merged.length - 1];
+    if (last && cur.start <= last.end) {
+      if (cur.end > last.end) last.end = cur.end;
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+
+  const months = merged.reduce((sum, i) => {
+    const m =
+      (i.end.getFullYear() - i.start.getFullYear()) * 12 +
+      (i.end.getMonth() - i.start.getMonth());
+    return sum + Math.max(m, 0);
+  }, 0);
+
+  /*
+   * employmentBackground is only ever promoted here, never demoted.
+   *
+   * Deleting the last experience row does not turn an Experienced hire
+   * back into a Fresher — that flag records what they were hired as, and
+   * flipping it because somebody tidied up a row would rewrite history.
+   * HR can still set it by hand on the employee record.
+   */
+  const patch = { totalExperienceMonths: months };
+  if (months > 0 && employee.employmentBackground !== "Experienced") {
+    patch.employmentBackground = "Experienced";
+  }
+
+  await employee.update(patch);
+  return months;
+};
+
+// ── Education ────────────────────────────────────────────────
+
+const EDUCATION_FIELDS = [
+  "level", "degree", "fieldOfStudy", "institution", "board",
+  "startYear", "endYear", "isPursuing", "gradeType", "gradeValue",
+  "documentUrl", "notes",
+];
+
+const pickFields = (body, allowed) =>
+  allowed.reduce((acc, key) => {
+    if (body[key] !== undefined) acc[key] = body[key];
+    return acc;
+  }, {});
+
+router.get("/:id/educations", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const educations = await EmployeeEducation.findAll({
+      where: { employeeId: employee.id },
+      // Newest qualification first — that is what anybody scanning the
+      // list is looking for.
+      order: [["endYear", "DESC"], ["startYear", "DESC"]],
+    });
+
+    res.json(educations);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/educations", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const data = pickFields(req.body, EDUCATION_FIELDS);
+
+    if (!data.degree || !data.institution) {
+      return res
+        .status(400)
+        .json({ message: "Degree and institution are required." });
+    }
+
+    // A course still in progress has no completed year yet. Left as-is
+    // the endYear would read as a completion date it is not.
+    if (data.isPursuing) data.gradeValue = data.gradeValue || null;
+
+    if (data.startYear && data.endYear && Number(data.endYear) < Number(data.startYear)) {
+      return res
+        .status(400)
+        .json({ message: "End year cannot be before start year." });
+    }
+
+    const education = await EmployeeEducation.create({
+      ...data,
+      employeeId: employee.id,
+    });
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_education_added",
+      resource: "EmployeeEducation",
+      resourceId: education.id,
+      resourceLabel: `${data.degree} — ${data.institution}`,
+      module: "hr",
+      changes: { after: data },
+    });
+
+    res.status(201).json(education);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/:id/educations/:eduId", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const education = await EmployeeEducation.findOne({
+      where: { id: req.params.eduId, employeeId: employee.id },
+    });
+    if (!education) return res.status(404).json({ message: "Education record not found" });
+
+    const before = education.toJSON();
+    const data = pickFields(req.body, EDUCATION_FIELDS);
+
+    const startYear = data.startYear ?? education.startYear;
+    const endYear = data.endYear ?? education.endYear;
+    if (startYear && endYear && Number(endYear) < Number(startYear)) {
+      return res
+        .status(400)
+        .json({ message: "End year cannot be before start year." });
+    }
+
+    await education.update(data);
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_education_updated",
+      resource: "EmployeeEducation",
+      resourceId: education.id,
+      resourceLabel: education.degree,
+      module: "hr",
+      changes: { before, after: education.toJSON() },
+    });
+
+    res.json(education);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * Verification is its own endpoint, not a field on PATCH.
+ *
+ * "HR sighted the original certificate" is a different act from "fix a
+ * typo in the institution name", and it stamps who and when. Letting it
+ * ride along in a normal update would make it possible to self-verify a
+ * record while editing it, which defeats the point of recording it.
+ */
+router.patch("/:id/educations/:eduId/verify", protect, authorize("admin", "super_admin", "manager"), async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const education = await EmployeeEducation.findOne({
+      where: { id: req.params.eduId, employeeId: employee.id },
+    });
+    if (!education) return res.status(404).json({ message: "Education record not found" });
+
+    const isVerified = req.body.isVerified !== false;
+
+    await education.update({
+      isVerified,
+      verifiedAt: isVerified ? new Date() : null,
+      verifiedById: isVerified ? req.user.id : null,
+    });
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: isVerified ? "employee_education_verified" : "employee_education_unverified",
+      resource: "EmployeeEducation",
+      resourceId: education.id,
+      resourceLabel: education.degree,
+      module: "hr",
+    });
+
+    res.json(education);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/:id/educations/:eduId", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const education = await EmployeeEducation.findOne({
+      where: { id: req.params.eduId, employeeId: employee.id },
+    });
+    if (!education) return res.status(404).json({ message: "Education record not found" });
+
+    const snapshot = education.toJSON();
+    await education.destroy();
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_education_deleted",
+      resource: "EmployeeEducation",
+      resourceId: req.params.eduId,
+      resourceLabel: snapshot.degree,
+      module: "hr",
+      changes: { before: snapshot },
+    });
+
+    res.json({ message: "Education record removed" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Work experience ──────────────────────────────────────────
+
+const EXPERIENCE_FIELDS = [
+  "companyName", "designation", "department", "employmentType", "location",
+  "startDate", "endDate", "isCurrent", "lastSalary", "currency",
+  "responsibilities", "reasonForLeaving", "referenceName",
+  "referenceDesignation", "referenceContact", "documentUrl", "notes",
+];
+
+/*
+ * isCurrent and endDate contradict each other if both are set, and the
+ * contradiction silently corrupts recalcExperience(). Resolve it once,
+ * here, rather than in three handlers.
+ *
+ * isCurrent wins: a user who ticks "I still work here" and leaves a
+ * stale end date behind means the tick.
+ */
+const normaliseExperienceDates = (data) => {
+  if (data.isCurrent) data.endDate = null;
+  else if (data.endDate === "") data.endDate = null;
+  return data;
+};
+
+router.get("/:id/experiences", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const experiences = await EmployeeExperience.findAll({
+      where: { employeeId: employee.id },
+      order: [["startDate", "DESC"]],
+    });
+
+    res.json(experiences);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/experiences", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const data = normaliseExperienceDates(pickFields(req.body, EXPERIENCE_FIELDS));
+
+    if (!data.companyName || !data.designation || !data.startDate) {
+      return res.status(400).json({
+        message: "Company name, designation and start date are required.",
+      });
+    }
+
+    if (data.endDate && new Date(data.endDate) < new Date(data.startDate)) {
+      return res
+        .status(400)
+        .json({ message: "End date cannot be before start date." });
+    }
+
+    const experience = await EmployeeExperience.create({
+      ...data,
+      employeeId: employee.id,
+    });
+
+    const months = await recalcExperience(employee);
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_experience_added",
+      resource: "EmployeeExperience",
+      resourceId: experience.id,
+      resourceLabel: `${data.designation} @ ${data.companyName}`,
+      module: "hr",
+      changes: { after: data },
+    });
+
+    res.status(201).json({ experience, totalExperienceMonths: months });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/:id/experiences/:expId", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const experience = await EmployeeExperience.findOne({
+      where: { id: req.params.expId, employeeId: employee.id },
+    });
+    if (!experience) return res.status(404).json({ message: "Experience record not found" });
+
+    const before = experience.toJSON();
+    const data = normaliseExperienceDates(pickFields(req.body, EXPERIENCE_FIELDS));
+
+    const startDate = data.startDate ?? experience.startDate;
+    const endDate = data.endDate !== undefined ? data.endDate : experience.endDate;
+    if (endDate && new Date(endDate) < new Date(startDate)) {
+      return res
+        .status(400)
+        .json({ message: "End date cannot be before start date." });
+    }
+
+    await experience.update(data);
+    const months = await recalcExperience(employee);
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_experience_updated",
+      resource: "EmployeeExperience",
+      resourceId: experience.id,
+      resourceLabel: `${experience.designation} @ ${experience.companyName}`,
+      module: "hr",
+      changes: { before, after: experience.toJSON() },
+    });
+
+    res.json({ experience, totalExperienceMonths: months });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/:id/experiences/:expId/verify", protect, authorize("admin", "super_admin", "manager"), async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const experience = await EmployeeExperience.findOne({
+      where: { id: req.params.expId, employeeId: employee.id },
+    });
+    if (!experience) return res.status(404).json({ message: "Experience record not found" });
+
+    const isVerified = req.body.isVerified !== false;
+
+    await experience.update({
+      isVerified,
+      verifiedAt: isVerified ? new Date() : null,
+      verifiedById: isVerified ? req.user.id : null,
+    });
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: isVerified ? "employee_experience_verified" : "employee_experience_unverified",
+      resource: "EmployeeExperience",
+      resourceId: experience.id,
+      resourceLabel: `${experience.designation} @ ${experience.companyName}`,
+      module: "hr",
+    });
+
+    res.json(experience);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/:id/experiences/:expId", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const experience = await EmployeeExperience.findOne({
+      where: { id: req.params.expId, employeeId: employee.id },
+    });
+    if (!experience) return res.status(404).json({ message: "Experience record not found" });
+
+    const snapshot = experience.toJSON();
+    await experience.destroy();
+
+    const months = await recalcExperience(employee);
+
+    await logEvent({
+      companyId: employee.companyId,
+      userId: req.user.id,
+      action: "employee_experience_deleted",
+      resource: "EmployeeExperience",
+      resourceId: req.params.expId,
+      resourceLabel: `${snapshot.designation} @ ${snapshot.companyName}`,
+      module: "hr",
+      changes: { before: snapshot },
+    });
+
+    res.json({ message: "Experience record removed", totalExperienceMonths: months });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/*
+ * The whole background in one call, plus the derived summary.
+ *
+ * The detail page's Background tab uses this instead of firing two
+ * requests and computing the summary in the browser — where it would be
+ * a second implementation of recalcExperience() that can disagree with
+ * the server's.
+ */
+router.get("/:id/background", protect, async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
+
+    const [educations, experiences] = await Promise.all([
+      EmployeeEducation.findAll({
+        where: { employeeId: employee.id },
+        order: [["endYear", "DESC"], ["startYear", "DESC"]],
+      }),
+      EmployeeExperience.findAll({
+        where: { employeeId: employee.id },
+        order: [["startDate", "DESC"]],
+      }),
+    ]);
+
+    const months = employee.totalExperienceMonths || 0;
+
+    res.json({
+      employmentBackground: employee.employmentBackground || "Fresher",
+      totalExperienceMonths: months,
+      totalExperienceLabel:
+        months >= 12
+          ? `${Math.floor(months / 12)} yr${Math.floor(months / 12) === 1 ? "" : "s"}` +
+            (months % 12 ? ` ${months % 12} mo` : "")
+          : `${months} mo`,
+      highestEducation:
+        educations.find((e) => !e.isPursuing)?.degree || educations[0]?.degree || null,
+      educations,
+      experiences,
+      // Surfaced so HR can see at a glance what still needs checking.
+      unverifiedCount:
+        educations.filter((e) => !e.isVerified).length +
+        experiences.filter((e) => !e.isVerified).length,
+    });
   } catch (err) {
     next(err);
   }

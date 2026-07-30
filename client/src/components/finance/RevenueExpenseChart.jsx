@@ -1,4 +1,5 @@
 import Chart from "react-apexcharts";
+import { formatCurrency } from "@/lib/utils";
 
 export default function RevenueExpenseChart({ data = [] }) {
   const options = {
@@ -8,10 +9,10 @@ export default function RevenueExpenseChart({ data = [] }) {
     dataLabels: { enabled: false },
     stroke: { show: true, width: 2, colors: ["transparent"] },
     xaxis: { categories: data.map((item) => item.month), labels: { style: { colors: "#6b7280", fontSize: "12px" } } },
-    yaxis: { labels: { formatter: (value) => `$${Number(value).toLocaleString()}` } },
+    yaxis: { labels: { formatter: (value) => formatCurrency(Number(value)) } },
     grid: { borderColor: "#e5e7eb", strokeDashArray: 4 },
     legend: { position: "top", horizontalAlign: "right" },
-    tooltip: { y: { formatter: (value) => `$${Number(value).toLocaleString()}` } },
+    tooltip: { y: { formatter: (value) => formatCurrency(Number(value)) } },
   };
 
   const series = [

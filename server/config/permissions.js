@@ -100,6 +100,17 @@ export const MODULES = [
   { key: 'email', label: 'Email', group: 'Communication', actions: CRUD },
   { key: 'notifications', label: 'Notifications', group: 'Communication', actions: ['view', 'update'] },
 
+  // ── Group oversight ─────────────────────────────────────────────
+  // Read-only visibility across every company BELOW the holder's own in
+  // the org hierarchy (companies.parentId). Granted to OS Group staff so
+  // the parent company can see what its child companies are doing
+  // without anyone needing super_admin, and without granting any write
+  // access to a child company's data.
+  //
+  // Holding group.view at a company with no children shows nothing —
+  // the scope is always "my descendants", never "everyone".
+  { key: 'group', label: 'Group Oversight', group: 'Group', actions: ['view', 'export'] },
+
   // ── Settings ────────────────────────────────────────────────────
   // 'settings' itself was requested by the sidebar but was not
   // grantable, so no non-super-admin could ever see the Settings menu

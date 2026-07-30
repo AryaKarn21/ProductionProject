@@ -1,6 +1,5 @@
 import Badge from '@/components/ui/Badge'
 import { Users, Clock } from 'lucide-react'
-import { summarizeByModule } from './permissionMeta'
 import RoleActionsMenu from './RoleActionsMenu'
 import { formatDate } from '@/lib/utils'
 

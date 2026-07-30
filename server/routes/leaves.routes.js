@@ -3,6 +3,7 @@ import { Op } from "sequelize";
 import { Leave, LeaveType, Employee, User } from "../models/index.js";
 import { protect } from "../middleware/auth.js";
 import { createNotification } from "../services/notification.service.js";
+import { findInScope } from '../utils/scope.js'
 const router = express.Router();
 const getCompany = (req) => req.companyId;
 
@@ -214,7 +215,7 @@ router.patch("/:id", protect, async (req, res, next) => {
 
 router.patch("/:id/approve", protect, async (req, res, next) => {
   try {
-    const leave = await Leave.findByPk(req.params.id);
+    const leave = await findInScope(req, Leave, req.params.id);
 
     if (!leave) {
       return res.status(404).json({
@@ -260,7 +261,7 @@ router.patch("/:id/approve", protect, async (req, res, next) => {
 
 router.patch("/:id/reject", protect, async (req, res, next) => {
   try {
-    const leave = await Leave.findByPk(req.params.id);
+    const leave = await findInScope(req, Leave, req.params.id);
 
     if (!leave) {
       return res.status(404).json({
@@ -307,7 +308,7 @@ router.patch("/:id/reject", protect, async (req, res, next) => {
 
 router.delete("/:id", protect, async (req, res, next) => {
   try {
-    const leave = await Leave.findByPk(req.params.id);
+    const leave = await findInScope(req, Leave, req.params.id);
 
     if (!leave) {
       return res.status(404).json({

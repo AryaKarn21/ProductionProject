@@ -30,9 +30,6 @@ export default function Calendar() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [activeView, setActiveView] = useState("dayGridMonth");
-  useEffect(() => {
-    loadMeetings();
-  }, []);
 
   // Convert API meetings to FullCalendar events
   const mapMeetingsToEvents = (meetings) => {
@@ -87,6 +84,22 @@ export default function Calendar() {
       setLoading(false);
     }
   };
+
+  /*
+   * Declared AFTER loadMeetings, not before it.
+   *
+   * This effect used to sit at the top of the component and call
+   * loadMeetings, which is a `const` arrow function defined ~40 lines
+   * below. It happened to work — effects run after the whole body has
+   * evaluated, so the binding is assigned by then — but it is a
+   * temporal-dead-zone reference that breaks the moment anyone calls it
+   * during render instead, and it reads as a bug to every linter.
+   */
+  useEffect(() => {
+    loadMeetings();
+    // Intentionally once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const upcomingMeetings = [...events]
     .sort((a, b) => new Date(a.start) - new Date(b.start))

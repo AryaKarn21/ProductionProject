@@ -1,5 +1,4 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 export default function Pagination({ total, page, pageSize, onChange }) {
   const totalPages = Math.ceil(total / pageSize)

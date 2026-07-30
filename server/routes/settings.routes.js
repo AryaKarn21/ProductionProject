@@ -5,6 +5,10 @@ import { Company, User, UserCompany, Role, Employee } from '../models/index.js'
 import { authorize, authorizePermission, can } from '../middleware/auth.js'
 import { validate, rules, validateUuidParam, parsePagination } from '../middleware/validate.js'
 import { logFromRequest, diffChanges } from '../utils/audit.js'
+import { normalizePermissions } from '../config/permissions.js'
+import { assertNoCycle, invalidateCompanyTree, getCompanyTree, getRoleScopeIds } from '../utils/companyTree.js'
+import { withoutAutoAudit } from '../middleware/requestContext.js'
+import { requireParentSuperAdmin, isCompanyInScope } from '../middleware/companyRank.js'
 
 const router = express.Router()
 
@@ -27,10 +31,40 @@ const USER_WRITABLE_FIELDS = ['name', 'email', 'phone', 'avatar', 'isActive', 's
 // The earlier version listed city/country/taxId (which the model does
 // not have) and omitted industry/type (which it does), so the Industry
 // field on the Add Company form was silently discarded.
+//
+// `parentId` is deliberately NOT in this list: it is the group hierarchy
+// and is applied separately, below, after a cycle check. Letting it
+// through `pick()` would allow a body to reparent a company with no
+// validation at all.
 const COMPANY_WRITABLE_FIELDS = [
   'name', 'type', 'industry', 'website', 'email', 'phone',
   'address', 'currency', 'timezone', 'logo', 'isActive',
 ]
+
+/**
+ * Validates and applies a parent-company assignment.
+ *
+ * Returns an error message, or null when `company.parentId` has been set
+ * (not yet saved). Pass `undefined` to leave the current parent alone;
+ * pass null to promote the company to a top-level root.
+ */
+const applyParent = async (company, parentId) => {
+  if (parentId === undefined) return null
+
+  if (parentId === null || parentId === '') {
+    company.parentId = null
+    return null
+  }
+
+  const parent = await Company.findByPk(parentId)
+  if (!parent) return 'The selected parent company does not exist.'
+
+  const cycle = await assertNoCycle(company.id, parentId)
+  if (cycle) return cycle
+
+  company.parentId = parent.id
+  return null
+}
 
 const pick = (source, allowed) =>
   allowed.reduce((acc, key) => {
@@ -97,7 +131,23 @@ const assertCanAssignRole = async (req, role) => {
 
   if (!role) return null
 
-  if (String(role.companyId) !== String(req.companyId)) {
+  /*
+   * A role may be owned by this company OR by any company above it in
+   * the group.
+   *
+   * Previously this demanded an exact companyId match, which broke the
+   * moment roles were defined once at the group parent and reused
+   * below — the situation on this deployment, where 12 of 17 users hold
+   * a role owned by a company other than their own. Those users' roles
+   * could not be reassigned at all: the guard rejected the very role
+   * they were already holding.
+   *
+   * Inheritance is upward only, so a sibling company's private roles
+   * stay unreachable, and the level check below still prevents anyone
+   * granting more authority than they hold themselves.
+   */
+  const allowedOwners = await getRoleScopeIds(req.companyId)
+  if (!allowedOwners.includes(String(role.companyId))) {
     return 'That role belongs to a different company.'
   }
 
@@ -108,6 +158,37 @@ const assertCanAssignRole = async (req, role) => {
   const myLevel = req.user.roleInfo?.level ?? 0
   if ((role.level ?? 0) > myLevel) {
     return 'You cannot assign a role with more authority than your own.'
+  }
+
+  /*
+   * You cannot hand out access you do not have yourself.
+   *
+   * The level check above was the ONLY guard, and it is easy to defeat
+   * without meaning to: RoleFormModel.jsx never sent a `level`, and
+   * Role.level defaults to 0, so every role created through the UI
+   * carried level 0. Five roles on this deployment ended up holding 96
+   * permissions — including users.manage and roles.create — at level 0.
+   * Since `0 > 0` is false, anyone holding one of them could assign
+   * that same near-admin access to anybody, themselves included.
+   *
+   * This is not new policy: assertNoEscalation() in roles.routes.js
+   * already applies exactly this rule when a role is CREATED or EDITED.
+   * Applying it on ASSIGNMENT too closes the gap between the two, and
+   * it keeps working even if `level` is never maintained.
+   *
+   * It can only ever deny — it grants nothing that was previously
+   * refused. Super admin is exempt, as everywhere else.
+   */
+  const mine = req.permissionSet || new Set()
+  const granting = normalizePermissions(role.permissions)
+  const excess = [...granting].filter((key) => !mine.has(key))
+
+  if (excess.length) {
+    return (
+      'You cannot assign a role that grants permissions you do not hold ' +
+      `yourself: ${excess.slice(0, 5).join(', ')}` +
+      (excess.length > 5 ? ` and ${excess.length - 5} more` : '')
+    )
   }
 
   return null
@@ -142,6 +223,11 @@ router.get(
 
       const companies = await Company.findAll({
         where,
+        // The company list drives the parent-company picker and the
+        // Group Console hierarchy, both of which need to know each
+        // company's parent — previously the association existed but was
+        // never included, so the client could not see the tree.
+        include: [{ model: Company, as: 'parent', attributes: ['id', 'name'] }],
         order: [['name', 'ASC']],
       })
 
@@ -152,9 +238,37 @@ router.get(
   }
 )
 
+/**
+ * GET /api/settings/companies/tree
+ *
+ * The org chart: every company nested under its parent. Used by the
+ * Group Console and by the parent-company picker to prevent a user
+ * selecting a parent that would create a loop.
+ */
+router.get(
+  '/companies/tree',
+  authorize('super_admin', 'admin', 'manager'),
+  async (req, res, next) => {
+    try {
+      // A non-super-admin only ever sees the subtree rooted at their own
+      // company, never the whole platform.
+      const rootId = req.user.role === 'super_admin' ? null : req.companyId
+      res.json(await getCompanyTree(rootId))
+    } catch (err) {
+      next(err)
+    }
+  }
+)
+
 router.post(
   '/companies',
-  authorize('super_admin'),
+  /*
+   * Was authorize('super_admin'), which let a CHILD company's super
+   * admin register new companies on the platform. Creating a company
+   * is a parent-company act, so the gate is now rank-aware: root
+   * company AND super admin. Everyone else gets 403.
+   */
+  requireParentSuperAdmin,
   validate({
     name: rules.string({ required: true, min: 2, max: 150 }),
     type: rules.string({ max: 50 }),
@@ -166,35 +280,90 @@ router.post(
     currency: rules.string({ max: 10 }),
     timezone: rules.string({ max: 60 }),
     logo: rules.string({ max: 500 }),
+    parentId: rules.uuid({ nullable: true }),
   }),
   async (req, res, next) => {
     const t = await sequelize.transaction()
     try {
-      // Whitelisted — a caller can no longer set `id`, `parentId` or
-      // `isActive` by slipping them into the body.
-      const company = await Company.create(pick(req.body, COMPANY_WRITABLE_FIELDS), {
-        transaction: t,
-      })
+      // Whitelisted — a caller can no longer set `id` or `isActive` by
+      // slipping them into the body. parentId is handled separately so
+      // it goes through the existence + cycle check.
 
-      await UserCompany.create(
-        {
-          userId: req.user.id,
-          companyId: company.id,
-          isPrimary: false,
-          assignedById: req.user.id,
-        },
-        { transaction: t }
+      /*
+       * A new company joins the group by default.
+       *
+       * Previously this stored `parentId || null`, so any company
+       * created without explicitly picking a parent became a top-level
+       * root — invisible to the Group Console, and silently outside the
+       * parent company's oversight. That is the opposite of what you
+       * want when you add a subsidiary from inside OS Group.
+       *
+       * So: omitted parent means "under the company I am working in".
+       * Creating a genuinely independent, top-level company is still
+       * possible, but it now has to be asked for explicitly, and only a
+       * super admin may do it — otherwise an admin could quietly park a
+       * company outside the group where nobody is watching it.
+       */
+      let parentId = req.body.parentId
+
+      if (parentId === undefined) {
+        parentId = req.companyId ?? null
+      } else if (parentId === null || parentId === '') {
+        parentId = req.user.role === 'super_admin' ? null : req.companyId ?? null
+      }
+
+      if (parentId) {
+        const parent = await Company.findByPk(parentId, { transaction: t })
+        if (!parent) {
+          await t.rollback()
+          return res.status(400).json({ message: 'The selected parent company does not exist.' })
+        }
+
+        /*
+         * Rank alone is not enough. Without this check, the super admin
+         * of parent group A could attach a new company underneath parent
+         * group B — both callers pass requireParentSuperAdmin, because
+         * both are root-company super admins. This is what keeps two
+         * unrelated groups on the same platform apart.
+         */
+        if (!(await isCompanyInScope(req, parentId))) {
+          await t.rollback()
+          return res.status(403).json({
+            message: 'You can only create companies inside your own group.',
+          })
+        }
+      }
+
+      const company = await withoutAutoAudit(() =>
+        Company.create(
+          { ...pick(req.body, COMPANY_WRITABLE_FIELDS), parentId: parentId || null },
+          { transaction: t }
+        )
+      )
+
+      await withoutAutoAudit(() =>
+        UserCompany.create(
+          {
+            userId: req.user.id,
+            companyId: company.id,
+            isPrimary: false,
+            assignedById: req.user.id,
+          },
+          { transaction: t }
+        )
       )
 
       await t.commit()
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: company.id,
         action: 'company_created',
         resource: 'Company',
         resourceId: company.id,
+        resourceLabel: company.name,
         module: 'settings',
-        changes: { after: { name: company.name } },
+        changes: { after: { name: company.name, parentId: company.parentId } },
       })
 
       res.status(201).json(company)
@@ -208,25 +377,48 @@ router.post(
 router.patch(
   '/companies/:id',
   validateUuidParam('id'),
-  authorize('super_admin', 'admin'),
+  /*
+   * Was authorize('super_admin', 'admin'), which let ANY company's admin
+   * edit their own company record. Company management now belongs to the
+   * parent company's super admin only.
+   */
+  requireParentSuperAdmin,
   async (req, res, next) => {
     try {
       const company = await Company.findByPk(req.params.id)
       if (!company) return res.status(404).json({ message: 'Department not found' })
 
-      // An admin may only edit their own company.
-      if (req.user.role !== 'super_admin' && String(company.id) !== String(req.companyId)) {
-        return res.status(403).json({ message: 'You cannot edit this company.' })
+      // The target must be the caller's own company or one beneath it.
+      // Replaces the old "admin may only edit their own company" check,
+      // which no longer applies now that admins cannot reach this route.
+      if (!(await isCompanyInScope(req, company.id))) {
+        return res.status(403).json({ message: 'That company is not in your group.' })
       }
 
       const before = company.toJSON()
-      await company.update(pick(req.body, COMPANY_WRITABLE_FIELDS))
+
+      // Reparenting is restricted to super admin: moving a company
+      // between branches of the group changes who can see its data.
+      if (req.body.parentId !== undefined) {
+        if (req.user.role !== 'super_admin') {
+          return res.status(403).json({
+            message: 'Only a super admin can change a company\'s parent.',
+          })
+        }
+        const problem = await applyParent(company, req.body.parentId)
+        if (problem) return res.status(400).json({ message: problem })
+      }
+
+      Object.assign(company, pick(req.body, COMPANY_WRITABLE_FIELDS))
+      await withoutAutoAudit(() => company.save())
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: company.id,
         action: 'company_updated',
         resource: 'Company',
         resourceId: company.id,
+        resourceLabel: company.name,
         module: 'settings',
         changes: diffChanges(before, company.toJSON()),
       })
@@ -241,7 +433,7 @@ router.patch(
 router.delete(
   '/companies/:id',
   validateUuidParam('id'),
-  authorize('super_admin'),
+  requireParentSuperAdmin,
   async (req, res, next) => {
     const t = await sequelize.transaction()
     try {
@@ -249,6 +441,11 @@ router.delete(
       if (!company) {
         await t.rollback()
         return res.status(404).json({ message: 'Company not found' })
+      }
+
+      if (!(await isCompanyInScope(req, company.id))) {
+        await t.rollback()
+        return res.status(403).json({ message: 'That company is not in your group.' })
       }
 
       // Refuse to orphan data. The old version hard-deleted the company
@@ -272,15 +469,29 @@ router.delete(
         })
       }
 
+      // Same reasoning as the user and role checks above, for the group
+      // hierarchy: deleting a parent left its children pointing at a
+      // parentId that no longer existed, which silently detached that
+      // whole branch from the Group Console.
+      const childCount = await Company.count({ where: { parentId: company.id } })
+      if (childCount > 0) {
+        await t.rollback()
+        return res.status(409).json({
+          message: `Cannot delete: ${childCount} company/companies sit under this one. Reassign or remove them first.`,
+        })
+      }
+
       await UserCompany.destroy({ where: { companyId: company.id }, transaction: t })
-      await company.destroy({ transaction: t })
+      await withoutAutoAudit(() => company.destroy({ transaction: t }))
       await t.commit()
+      invalidateCompanyTree()
 
       await logFromRequest(req, {
         companyId: null,
         action: 'company_deleted',
         resource: 'Company',
         resourceId: req.params.id,
+        resourceLabel: company.name,
         module: 'settings',
         changes: { before: { name: company.name } },
       })
@@ -305,9 +516,31 @@ router.get(
   async (req, res, next) => {
     try {
       const { page, limit, offset } = parsePagination(req)
-      const { search, status, roleId } = req.query
+      const { search, status, roleId, unassigned } = req.query
 
-      const where = { ...companyScope(req) }
+      /*
+       * Orphaned accounts.
+       *
+       * POST /auth/register creates a user with role 'employee' and no
+       * company. Until somebody assigns them, resolveCompany() rejects
+       * every request they make — so the account exists, can
+       * authenticate, and can do nothing.
+       *
+       * They were also unreachable: companyScope() only returns an
+       * unfiltered view for a super admin with NO company selected, but
+       * the axios client always sends X-Company-ID, so req.companyId
+       * was always set and `WHERE companyId = <uuid>` never matched
+       * NULL. The result was that these accounts could not be seen,
+       * assigned or deactivated from anywhere in the UI.
+       *
+       * ?unassigned=true surfaces exactly those rows. Restricted to
+       * super admin, because an unassigned user belongs to no tenant
+       * and therefore sits outside any company admin's authority.
+       */
+      const wantsUnassigned =
+        unassigned === 'true' && req.user.role === 'super_admin'
+
+      const where = wantsUnassigned ? { companyId: null } : { ...companyScope(req) }
 
       if (search) {
         where[Op.or] = [
@@ -333,7 +566,59 @@ router.get(
         distinct: true,
       })
 
-      res.json({ users: rows, total: count, page, limit })
+      /*
+       * Reported on every request so the Users screen can show the
+       * orphaned accounts rather than hiding them behind a query
+       * parameter nobody knows to type. Only a super admin can act on
+       * them, so only a super admin is told they exist.
+       *
+       * Two DIFFERENT numbers, because conflating them overstates the
+       * problem: having no home company is untidy, but only an account
+       * with no home company AND no membership is actually broken —
+       * resolveCompany() falls back to the first membership, so the
+       * others work fine.
+       */
+      let unassignedCount = 0
+      let blockedCount = 0
+
+      if (req.user.role === 'super_admin') {
+        /*
+         * unassignedCount counts EVERY account with no home company,
+         * including deactivated ones. It controls whether the "Review
+         * them" toggle is offered at all, and a retired orphan still
+         * appears in no other list in the app — dropping it from this
+         * count would make it unreachable again, which is the precise
+         * bug this whole feature exists to fix.
+         *
+         * blockedCount is the ACTIONABLE subset: still active, and with
+         * no membership to fall back on, so genuinely unable to use the
+         * app. That is what drives the warning wording, so the alert
+         * clears once the accounts have been dealt with instead of
+         * nagging forever.
+         */
+        const orphans = await User.findAll({
+          where: { companyId: null },
+          attributes: ['id', 'isActive'],
+          raw: true,
+        })
+        unassignedCount = orphans.length
+
+        const active = orphans.filter((o) => o.isActive)
+        if (active.length) {
+          const withMembership = await UserCompany.findAll({
+            where: {
+              userId: { [Op.in]: active.map((o) => o.id) },
+              isActive: { [Op.ne]: false },
+            },
+            attributes: ['userId'],
+            raw: true,
+          })
+          const rescued = new Set(withMembership.map((m) => String(m.userId)))
+          blockedCount = active.filter((o) => !rescued.has(String(o.id))).length
+        }
+      }
+
+      res.json({ users: rows, total: count, page, limit, unassignedCount, blockedCount })
     } catch (err) {
       next(err)
     }
@@ -454,7 +739,11 @@ router.post(
           await t.rollback()
           return res.status(400).json({ message: 'Selected role does not exist.' })
         }
-        if (String(assignedRole.companyId) !== String(targetCompanyId)) {
+        // Same group-inheritance rule as assertCanAssignRole(): the
+        // role may be owned by the target company or by any company
+        // above it, so a subsidiary can use the group's standard roles.
+        const roleOwners = await getRoleScopeIds(targetCompanyId)
+        if (!roleOwners.includes(String(assignedRole.companyId))) {
           await t.rollback()
           return res.status(400).json({
             message: 'That role belongs to a different company.',
@@ -870,7 +1159,8 @@ router.put(
           await t.rollback()
           return res.status(400).json({ message: `Role ${m.roleId} does not exist.` })
         }
-        if (String(role.companyId) !== String(m.companyId)) {
+        const membershipRoleOwners = await getRoleScopeIds(m.companyId)
+        if (!membershipRoleOwners.includes(String(role.companyId))) {
           await t.rollback()
           return res.status(400).json({
             message: `Role "${role.name}" does not belong to the selected company.`,

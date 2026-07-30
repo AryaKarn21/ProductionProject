@@ -31,51 +31,17 @@ export default function OpportunitiesList() {
   })
 
 
-  const updateMutation = useMutation({
-  mutationFn: async (data) => {
-    const res = await opportunitiesAPI.update(id, {
-      ...data,
-      value: Number(data.value),
-      probability: Number(data.probability),
-      assignedToId: data.assignedToId || null,
-    });
-
-    return res;
-  },
-
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
-    queryClient.invalidateQueries({ queryKey: ["opportunities"] });
-    queryClient.invalidateQueries({ queryKey: ["opportunities-kanban"] });
-
-    /*
-     * Editing stage (e.g. into/out of "Closed Won") can affect:
-     * - Dashboard KPIs, Top/Won deals tables and charts
-     * - Analytics: Won Deals, Deals by Stage, Pipeline, Forecast
-     */
-    [
-      "dashboard-stats",
-      "dashboard-top-deals",
-      "dashboard-won-deals",
-      "dashboard-charts",
-      "reports-dashboard-stats",
-      "sales-report",
-      "sales-forecast",
-    ].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
-
-    toast.success("Opportunity updated successfully");
-
-    navigate(`/crm/opportunities/${id}`);
-  },
-
-  onError: (err) => {
-    toast.error(
-      err.response?.data?.message ||
-      "Failed to update opportunity"
-    );
-  },
-});
-const deleteMutation = useMutation({
+  /*
+   * An `updateMutation` used to sit here. It was copy-pasted from
+   * OpportunityEdit.jsx, which is a detail page and has a `:id` route
+   * param — this is the LIST page and has none, so all three of its
+   * references to `id` were undefined. It was never called from
+   * anywhere in this file, so it never threw; wiring it to a button
+   * would have produced a ReferenceError on the first click.
+   *
+   * Editing happens on the detail page, which has the working copy.
+   */
+  const deleteMutation = useMutation({
     mutationFn: opportunitiesAPI.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opportunities'] })

@@ -257,7 +257,7 @@ const buildAttachmentRecords = async (files, emailId, req) => {
         companyId: req.companyId,
         createdBy: req.user.id,
         emailId,
-        fileName: file.filename,
+        fileName: file.originalname,
         originalName: file.originalname,
         mimeType: file.mimetype,
         sizeBytes: file.size,

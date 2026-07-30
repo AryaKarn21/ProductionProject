@@ -2,17 +2,20 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 // CORRECT — valid names in lucide-react v1
 import {
-  LayoutDashboard, Users, CircleUser, Briefcase, TrendingUp,
-  UserCheck, Clock, Calendar, DollarSign, Wallet, Receipt,
+  LayoutDashboard, Users, TrendingUp, Calendar, DollarSign,
   Package, ShoppingCart, FolderKanban, Headphones,
-  BarChart3, Settings, ChevronDown, ChevronRight, Building2, Menu, X
+  BarChart3, Settings, ChevronDown, ChevronRight, Building2, Menu, X,
+  Network
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui.store'
 import { useAuthStore } from '@/store/auth.store'
 import { cn, getInitials } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import CompanySwitcher from './CompanySwitcher'
 import usePermission from '@/hooks/usePermission'
+import useCompanyScope from '@/hooks/useCompanyScope'
+import { groupAPI } from '@/api/group.api'
 
 const NAV = [
   {
@@ -72,6 +75,11 @@ const NAV = [
       {
         label: 'Attendance',
         to: '/hr/attendance',
+        permission: 'attendance.view',
+      },
+      {
+        label: 'Attendance Register',
+        to: '/hr/attendance/register',
         permission: 'attendance.view',
       },
       {
@@ -174,6 +182,39 @@ const NAV = [
     permission: 'analytics.view',
   },
 
+  /*
+   * Group Console — parent-company oversight.
+   *
+   * `groupOnly` is checked in addition to the permission: the menu is
+   * hidden for a company with no children, because the console would
+   * have nothing to show. See the useQuery in Sidebar() below.
+   */
+  {
+    label: 'Group Console',
+    icon: Network,
+    groupOnly: true,
+    children: [
+      {
+        label: 'Overview',
+        to: '/group',
+        permission: 'group.view',
+        // Without this every /group/* route would also light up
+        // "Overview", since NavLink matches by prefix by default.
+        exact: true,
+      },
+      {
+        label: 'Group Activity',
+        to: '/group/activity',
+        permission: 'group.view',
+      },
+      {
+        label: 'Group Structure',
+        to: '/group/structure',
+        permission: 'group.view',
+      },
+    ],
+  },
+
   {
     label: 'Settings',
     icon: Settings,
@@ -218,7 +259,7 @@ function NavGroup({ item, collapsed }) {
       {open && (
         <div className="ml-4 mt-0.5 border-l border-white/10 pl-3 flex flex-col gap-0.5">
           {item.children.map(child => (
-            <NavLink key={child.to} to={child.to}
+            <NavLink key={child.to} to={child.to} end={child.exact}
               className={({ isActive }) => cn('nav-item', isActive && 'active')}
             >{child.label}</NavLink>
           ))}
@@ -233,9 +274,53 @@ export default function Sidebar() {
   const { user } = useAuthStore()
   const isMobile = useIsMobile()
   const location = useLocation()
-  const { hasPermission } = usePermission()
+  const { hasPermission, isSuperAdmin } = usePermission()
+  const { isParentSuperAdmin } = useCompanyScope()
+
+  /*
+   * Does the active company actually have child companies?
+   *
+   * Only asked when the user holds group.view, so nobody else pays for
+   * the request. A super admin always sees the menu even when the answer
+   * is no, because they are the one who sets up the hierarchy and would
+   * otherwise have no way to reach the screen that explains how.
+   */
+  /*
+   * Only the parent company's super admin can reach /api/group/* at all
+   * now (server/middleware/companyRank.js), so `enabled` is narrowed to
+   * match. Without that, every child-company user fired a request on
+   * each page load that could only ever come back 403.
+   */
+  const { data: groupScope } = useQuery({
+    queryKey: ['group-scope'],
+    queryFn: () => groupAPI.getScope().then((r) => r.data),
+    enabled: isParentSuperAdmin && hasPermission('group.view'),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  /*
+   * The Group Console is parent-company-only.
+   *
+   * isParentSuperAdmin is checked FIRST and is not something a super
+   * admin can bypass: switching into a child company makes it false,
+   * which is the intended behaviour — the child's dashboard must not
+   * show group-level menus regardless of who is looking at it.
+   *
+   * The childCount clause is kept for the remaining case: a parent
+   * company that has not been given any children yet would open a
+   * console with nothing in it. A super admin still sees the menu there,
+   * because they are the one who sets the hierarchy up and would
+   * otherwise have no route to the screen that explains how.
+   */
+  const showGroupConsole =
+    isParentSuperAdmin &&
+    hasPermission('group.view') &&
+    (isSuperAdmin || (groupScope?.childCount ?? 0) > 0)
 
   const filteredNav = NAV.reduce((result, item) => {
+    if (item.groupOnly && !showGroupConsole) return result
+
     // Single menu item (Dashboard, Procurement, etc.)
     if (!item.children) {
       if (hasPermission(item.permission)) {

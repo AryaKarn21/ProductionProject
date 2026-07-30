@@ -8,6 +8,7 @@ import { sequelize } from "./config/db.js";
 import "./models/index.js"; // registers all associations before sync/queries run
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
 import authRoutes from "./routes/auth.routes.js";
 import leadsRoutes from "./routes/leads.routes.js";
@@ -31,9 +32,12 @@ import reportsRoutes from "./routes/reports.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import rolesRoutes from "./routes/roles.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import groupRoutes from "./routes/group.routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
 import { resolveCompany } from "./middleware/tenant.js";
+import { resolveCompanyRank } from "./middleware/companyRank.js";
+import { requestContext } from "./middleware/requestContext.js";
 import meetingsRoutes from "./routes/meetings.routes.js";
 import meetingAttendeeRoutes from "./routes/meetingAttendees.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -62,6 +66,81 @@ if (process.env.JWT_SECRET.length < 32) {
     '  node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"'
   );
   process.exit(1);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Leaked-credential guard
+|--------------------------------------------------------------------------
+| server/.env was committed in 323f0ff ("Initial commit") to a PUBLIC
+| repository, exposing the production JWT_SECRET and database password.
+| Anyone holding the old JWT_SECRET can forge a token for any user,
+| including super_admin, which defeats every authorisation check in this
+| codebase; the database password grants direct access, bypassing the
+| application entirely.
+|
+| Both were rotated. This guard refuses to start if a leaked value ever
+| comes back — from an old backup, a stale deploy, a teammate's copy of
+| .env, or a restored snapshot. Silent reintroduction is the realistic
+| failure mode, and it would be invisible without this.
+|
+| The values are compared as SHA-256 digests so the secrets themselves
+| are not reintroduced into the repository in plaintext. A digest is
+| useless to an attacker who does not already have the secret — and one
+| who does can read it in the public git history anyway.
+*/
+const sha256 = (value) =>
+  crypto.createHash("sha256").update(String(value)).digest("hex");
+
+/*
+ * JWT_SECRET is FATAL.
+ *
+ * The API is the attack surface here: anyone with the old secret can
+ * mint a token for any user, including super_admin, and every
+ * authorisation check in this codebase then passes. Refusing to start
+ * genuinely removes that. Rotating costs nothing — generate a new
+ * random string — so failing closed is cheap and correct.
+ */
+const LEAKED_JWT_SECRET =
+  "5f3695c6065041289cdfade7938338e3be58e2ac0d23782d52655361a42e1e8e";
+
+if (process.env.JWT_SECRET && sha256(process.env.JWT_SECRET) === LEAKED_JWT_SECRET) {
+  console.error(
+    "\nFATAL: JWT_SECRET is the value published in this repository's " +
+    "public git history.\n" +
+    "Anyone holding it can forge a token for any user, including " +
+    "super_admin.\n\n" +
+    "  Generate a replacement:\n" +
+    '    node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"\n\n' +
+    "  Rotating signs every user out. That is intended — tokens forged\n" +
+    "  with the old secret stop working immediately.\n"
+  );
+  process.exit(1);
+}
+
+/*
+ * DB_PASSWORD is a WARNING, deliberately not fatal.
+ *
+ * Refusing to boot would not protect anything. An attacker holding the
+ * database password connects to MySQL directly and never touches this
+ * process — so failing closed here costs a working environment and buys
+ * no security whatsoever. The only real fix is rotating it in the
+ * hosting panel, and nagging loudly on every start is the honest way to
+ * keep that visible without breaking the app in the meantime.
+ */
+const LEAKED_DB_PASSWORD =
+  "2c321e183c3e756d60538f38cee0d2352e0174abfca8ad602171b80d77295e38";
+
+if (process.env.DB_PASSWORD && sha256(process.env.DB_PASSWORD) === LEAKED_DB_PASSWORD) {
+  console.warn(
+    "\n" + "!".repeat(72) + "\n" +
+    "  SECURITY: DB_PASSWORD is the value published in this repository's\n" +
+    "  public git history. Anyone who has seen the repo can connect to\n" +
+    "  this database directly and read or modify every company's data,\n" +
+    "  bypassing the application entirely.\n\n" +
+    "  Rotate it in Hostinger -> Databases, update DB_PASSWORD, restart.\n" +
+    "!".repeat(72) + "\n"
+  );
 }
 
 /*
@@ -218,44 +297,67 @@ app.use(
   })
 );
 
+/*
+|--------------------------------------------------------------------------
+| Tenant chain
+|--------------------------------------------------------------------------
+| Every protected router runs the same three middlewares, in this order:
+|
+|   protect         who is calling (JWT -> req.user, req.memberships)
+|   resolveCompany  which tenant they may touch (-> req.companyId)
+|   requestContext  publishes both into AsyncLocalStorage, so the audit
+|                   hooks in models/auditHooks.js can attribute every
+|                   write to a user and a company without each route
+|                   having to pass `req` down to the model layer.
+|
+| requestContext MUST come after resolveCompany: before it runs,
+| req.companyId does not exist yet and audit rows would be stamped with
+| the user's home company instead of the one they are working in.
+*/
+// resolveCompanyRank MUST come after resolveCompany: it reads
+// req.companyId to decide whether this request is operating inside a
+// parent (root) company or a child, and writes the result to
+// req.isParentCompany / req.isParentSuperAdmin. It only sets flags and
+// never rejects a request on its own, so mounting it globally here
+// changes the behaviour of no existing route.
+const tenantChain = [protect, resolveCompany, requestContext, resolveCompanyRank];
+
 app.use("/api/auth", authRoutes);
 
-app.use("/api/meetings", protect, resolveCompany, meetingsRoutes);
-app.use("/api/meeting-attendees", protect, resolveCompany, meetingAttendeeRoutes);
+app.use("/api/meetings", ...tenantChain,meetingsRoutes);
+app.use("/api/meeting-attendees", ...tenantChain,meetingAttendeeRoutes);
 
-app.use("/api/leads", protect, resolveCompany, leadsRoutes);
-app.use("/api/accounts", protect, resolveCompany, accountsRoutes);
-app.use("/api/contacts", protect, resolveCompany, contactsRoutes);
-app.use("/api/opportunities", protect, resolveCompany, opportunitiesRoutes);
-app.use("/api/dashboard", protect, resolveCompany, dashboardRoutes);
-app.use("/api/employees", protect, resolveCompany, employeesRoutes);
-app.use("/api/performance", protect, resolveCompany, performanceRoutes);
-app.use("/api/users", protect, resolveCompany, usersRoutes);
-app.use("/api/attendance", protect, resolveCompany, attendanceRoutes);
-app.use("/api/shifts", protect, resolveCompany, shiftRoutes);
-app.use("/api/leaves", protect, resolveCompany, leavesRoutes);
-app.use(
-  "/api/holidays",
-  protect,
-  resolveCompany,
-  holidayRoutes
-);
-app.use("/api/payroll", protect, resolveCompany, payrollRoutes);
-app.use("/api/finance", protect, resolveCompany, financeRoutes);
-app.use("/api/inventory", protect, resolveCompany, inventoryRoutes);
-app.use("/api/procurement", protect, resolveCompany, procurementRoutes);
-app.use("/api/projects", protect, resolveCompany, projectsRoutes);
-app.use("/api/support", protect, resolveCompany, supportRoutes);
-app.use("/api/reports", protect, resolveCompany, reportsRoutes);
-app.use("/api/notifications", protect, resolveCompany, notificationsRoutes);
+app.use("/api/leads", ...tenantChain,leadsRoutes);
+app.use("/api/accounts", ...tenantChain,accountsRoutes);
+app.use("/api/contacts", ...tenantChain,contactsRoutes);
+app.use("/api/opportunities", ...tenantChain,opportunitiesRoutes);
+app.use("/api/dashboard", ...tenantChain,dashboardRoutes);
+app.use("/api/employees", ...tenantChain,employeesRoutes);
+app.use("/api/performance", ...tenantChain,performanceRoutes);
+app.use("/api/users", ...tenantChain,usersRoutes);
+app.use("/api/attendance", ...tenantChain,attendanceRoutes);
+app.use("/api/shifts", ...tenantChain,shiftRoutes);
+app.use("/api/leaves", ...tenantChain,leavesRoutes);
+app.use("/api/holidays", ...tenantChain, holidayRoutes);
+app.use("/api/payroll", ...tenantChain,payrollRoutes);
+app.use("/api/finance", ...tenantChain,financeRoutes);
+app.use("/api/inventory", ...tenantChain,inventoryRoutes);
+app.use("/api/procurement", ...tenantChain,procurementRoutes);
+app.use("/api/projects", ...tenantChain,projectsRoutes);
+app.use("/api/support", ...tenantChain,supportRoutes);
+app.use("/api/reports", ...tenantChain,reportsRoutes);
+app.use("/api/notifications", ...tenantChain,notificationsRoutes);
 
 // SECURITY: resolveCompany was missing here, which is why every user
 // endpoint under /api/settings ran with no tenant scope at all.
-app.use("/api/settings", protect, resolveCompany, settingsRoutes);
+app.use("/api/settings", ...tenantChain,settingsRoutes);
 
-app.use("/api/roles", protect, resolveCompany, rolesRoutes);
-app.use("/api/audit-logs", protect, resolveCompany, auditRoutes);
-app.use("/api/email", protect, resolveCompany, emailRoutes);
+app.use("/api/roles", ...tenantChain,rolesRoutes);
+app.use("/api/audit-logs", ...tenantChain,auditRoutes);
+
+// Parent-company oversight: read-only visibility across every company
+// below the caller's own in the hierarchy. Scoped by middleware/groupScope.js.
+app.use("/api/group", ...tenantChain, groupRoutes);
 
 // Google OAuth for Gmail. Mounted BEFORE the protected email router: it
 // applies `protect` per-route so the /google/callback redirect from Google
@@ -263,9 +365,9 @@ app.use("/api/email", protect, resolveCompany, emailRoutes);
 // the signed `state` instead. All other /api/email/* paths fall through to
 // the protected emailRoutes below.
 app.use("/api/email", googleAuthRoutes);
-//app.use("/api/email", protect, resolveCompany, emailRoutes);
-app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+app.use("/api/email", ...tenantChain,emailRoutes);
 
+app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api", notFoundHandler);
 app.use(errorHandler);
 
@@ -273,34 +375,34 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
+    console.log(`DB: ${process.env.DB_USER}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}/${process.env.DB_NAME}`);
+
     await sequelize.authenticate();
     console.log("MySQL connected");
 
-    // ────────────────────────────────────────────────────────────────
-    // IMPORTANT — READ BEFORE FIRST RUN
-    //
-    // This release adds columns to several tables:
-    //   audit_logs   : module, device, browser, status, userAgent, sessionId
-    //   users        : status, tokenVersion, passwordChangedAt,
-    //                  failedLoginAttempts, lockedUntil, mfaEnabled, mfaSecret
-    //   roles        : parentRoleId, level, isSystem, createdById, updatedById
-    //   user_companies: id, roleId, isPrimary, isActive, joinedAt,
-    //                  assignedById, createdAt, updatedAt
-    //   shifts       : weeklyOffDays (NEW — automatic Absent finalization fix)
-    //   payslips     : unpaidAbsentDays, absentDeduction (NEW — same fix)
-    // and adds a new table:
-    //   holidays     : companyId, date, name, isActive (NEW — same fix)
-    //
-    // A bare sequelize.sync() never adds columns to tables that already
-    // exist. Run the app ONCE with alter enabled to apply them:
-    //
-    //   DB_SYNC_ALTER=true npm run dev
-    //
-    // then start it normally again. Take a database backup first.
-    // ────────────────────────────────────────────────────────────────
-    const alter = process.env.DB_SYNC_ALTER === "true";
-    await sequelize.sync({ alter });
-    console.log(alter ? "Database synced (ALTER applied)" : "Database synced");
+    /*
+     * Schema sync.
+     *
+     * This block previously read DB_SYNC_ALTER into `alter`, logged
+     * "Skipping sync", then logged "Database synced" anyway — and never
+     * called sequelize.sync() at all. So the log said the schema was up
+     * to date while nothing had touched it, and any newly added column
+     * or table silently did not exist until someone ran the SQL by hand.
+     *
+     * Now it does what it says. Sync stays OFF by default because
+     * alter-ing a live production schema on boot is dangerous; run the
+     * checked-in migration instead (see migrations/), or set
+     * DB_SYNC_ALTER=true in development to let Sequelize do it.
+     */
+    if (process.env.DB_SYNC_ALTER === "true") {
+      await sequelize.sync({ alter: true });
+      console.log("Database synced (ALTER applied)");
+    } else {
+      console.log(
+        "Schema sync skipped (DB_SYNC_ALTER is not 'true'). " +
+        "Apply pending changes with migrations/ if the app reports missing columns."
+      );
+    }
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
