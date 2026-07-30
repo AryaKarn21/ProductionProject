@@ -1,57 +1,39 @@
 import { useQuery } from '@tanstack/react-query'
-import { useParams, Link } from 'react-router-dom'
-import {
-  ArrowLeft,
-  Users,
-  TrendingUp,
-  FolderKanban,
-  Headphones,
-  Wallet,
-  Target,
-  UserCheck,
-  Truck,
-  ShoppingCart,
-  CalendarCheck,
-  Banknote,
-  Mail,
-} from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, Building2, ChevronRight, Users, TrendingUp } from 'lucide-react'
 import { groupAPI } from '@/api/group.api'
 import { formatCurrency } from '@/lib/utils'
-import GroupKpiCard from './components/GroupKpiCard'
-import ActivityRow from './components/ActivityRow'
+import GroupEmptyState from './components/GroupEmptyState'
 
 /*
 |--------------------------------------------------------------------------
-| Group Console — one child company
+| Group Console — Company Structure
 |--------------------------------------------------------------------------
 |
-| Drill-down for a single company in the group: its profile, headline
-| numbers and most recent 25 changes — without the parent-company user
-| having to switch tenants, which would change their permissions and
-| leave a misleading trail in that company's own audit log.
+| A list of every child company under the caller's own company, each
+| linking through to its own drill-down (GroupCompanyDetail).
 |
-| Read-only by design. There is no write path on /api/group/*.
+| Reuses GET /group/overview rather than adding a new endpoint — it
+| already returns one row per company in scope (`byCompany`), and this
+| page is just a friendlier, list-shaped view of the same data the
+| Overview page renders as a table.
 */
-export default function GroupCompanyDetail() {
-  const { id } = useParams()
-
+export default function GroupCompanies() {
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['group-company', id],
-    queryFn: () => groupAPI.getCompany(id).then((r) => r.data),
+    queryKey: ['group-companies'],
+    queryFn: () => groupAPI.getOverview().then((r) => r.data),
   })
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 max-w-[1600px] mx-auto w-full space-y-4">
-        <div className="h-20 rounded-xl bg-slate-900/50 border border-slate-800 animate-pulse" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-24 rounded-xl bg-slate-900/50 border border-slate-800 animate-pulse"
-            />
-          ))}
-        </div>
+      <div className="p-4 sm:p-6 max-w-[1600px] mx-auto w-full space-y-3">
+        <div className="h-16 rounded-xl bg-slate-900/50 border border-slate-800 animate-pulse" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-20 rounded-xl bg-slate-900/50 border border-slate-800 animate-pulse"
+          />
+        ))}
       </div>
     )
   }
@@ -59,152 +41,69 @@ export default function GroupCompanyDetail() {
   if (isError) {
     return (
       <div className="p-6 max-w-[1600px] mx-auto w-full">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-center">
-          <p className="text-sm text-slate-300">
-            {error?.response?.data?.message || 'Could not load this company.'}
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-6 text-center">
+          <AlertTriangle size={20} className="mx-auto text-rose-400 mb-2" />
+          <p className="text-sm font-semibold text-white">Could not load your company structure</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {error?.response?.data?.message || 'Please try again.'}
           </p>
-          <Link
-            to="/group"
-            className="inline-block mt-4 text-xs font-semibold text-blue-400 hover:text-blue-300"
-          >
-            Back to the Group Console
-          </Link>
         </div>
       </div>
     )
   }
 
-  const { company, stats, recentActivity, periodDays = 30 } = data
-  const currency = company.currency || 'NPR'
+  const { root, isEmpty, byCompany } = data
+  const currency = 'NPR'
+
+  // The root's own numbers are visible on its normal dashboard already —
+  // this screen is specifically about the children beneath it.
+  const children = byCompany.filter((row) => !row.isRoot)
 
   return (
     <div className="space-y-5 p-4 sm:p-6 max-w-[1600px] mx-auto w-full animate-fade-in">
-      <Link
-        to="/group"
-        className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-      >
-        <ArrowLeft size={13} /> Group Console
-      </Link>
+      <div>
+        <h1 className="text-lg font-bold text-white tracking-tight">Company Structure</h1>
+        <p className="text-xs text-slate-400 mt-1">
+          Every company under <span className="text-slate-300">{root?.name}</span> in the hierarchy
+        </p>
+      </div>
 
-      {/* Profile */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">{company.name}</h1>
-            <p className="text-xs text-slate-400 mt-1">
-              {[company.type, company.industry].filter(Boolean).join(' · ') || 'Company'}
-              {company.parent && (
-                <>
-                  {' · under '}
-                  <span className="text-slate-300">{company.parent.name}</span>
-                </>
-              )}
-            </p>
-          </div>
+      {isEmpty || children.length === 0 ? (
+        <GroupEmptyState rootName={root?.name} />
+      ) : (
+        <div className="space-y-3">
+          {children.map((row) => (
+            <Link
+              key={row.company.id}
+              to={`/group/companies/${row.company.id}`}
+              className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 hover:border-slate-700 hover:bg-slate-900 transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
+                  <Building2 size={18} className="text-slate-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{row.company.name}</p>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {row.company.type || 'Company'}
+                  </p>
+                </div>
+              </div>
 
-          <dl className="text-xs space-y-1 sm:text-right">
-            {company.email && (
-              <div>
-                <dt className="inline text-slate-500">Email: </dt>
-                <dd className="inline text-slate-300">{company.email}</dd>
+              <div className="hidden sm:flex items-center gap-6 text-xs text-slate-400 flex-shrink-0">
+                <span className="flex items-center gap-1.5">
+                  <Users size={13} /> {row.employees} employees
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <TrendingUp size={13} /> {formatCurrency(row.pipelineValue, currency)} pipeline
+                </span>
               </div>
-            )}
-            {company.phone && (
-              <div>
-                <dt className="inline text-slate-500">Phone: </dt>
-                <dd className="inline text-slate-300">{company.phone}</dd>
-              </div>
-            )}
-            {company.address && (
-              <div>
-                <dt className="inline text-slate-500">Address: </dt>
-                <dd className="inline text-slate-300">{company.address}</dd>
-              </div>
-            )}
-          </dl>
+
+              <ChevronRight size={16} className="text-slate-500 flex-shrink-0" />
+            </Link>
+          ))}
         </div>
-      </div>
-
-      {/* Headline numbers */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <GroupKpiCard label="Headcount" value={stats.employees} sub="active employees" icon={Users} />
-        <GroupKpiCard label="Leads" value={stats.leads} sub="all stages" icon={Target} />
-        <GroupKpiCard
-          label="Open pipeline"
-          value={formatCurrency(stats.pipelineValue, currency)}
-          icon={TrendingUp}
-        />
-        <GroupKpiCard
-          label="Active projects"
-          value={stats.projectsActive}
-          icon={FolderKanban}
-        />
-        <GroupKpiCard
-          label="Open tickets"
-          value={stats.ticketsOpen}
-          icon={Headphones}
-          tone={stats.ticketsOpen > 0 ? 'warn' : 'default'}
-        />
-        <GroupKpiCard
-          label="Expenses awaiting approval"
-          value={formatCurrency(stats.expensePending, currency)}
-          icon={Wallet}
-          tone={stats.expensePending > 0 ? 'warn' : 'default'}
-        />
-        <GroupKpiCard label="Users" value={stats.users} sub="active seats" icon={UserCheck} />
-        <GroupKpiCard label="Clients" value={stats.clients} icon={Users} />
-        <GroupKpiCard label="Vendors" value={stats.vendors} icon={Truck} />
-        <GroupKpiCard
-          label="Purchase orders"
-          value={stats.purchaseOrdersTotal}
-          sub={`${stats.purchaseOrdersPending} pending`}
-          icon={ShoppingCart}
-          tone={stats.purchaseOrdersPending > 0 ? 'warn' : 'default'}
-        />
-        <GroupKpiCard
-          label="Attendance"
-          value={stats.attendancePct != null ? `${stats.attendancePct}%` : '—'}
-          sub={`present, last ${periodDays}d`}
-          icon={CalendarCheck}
-          tone={stats.attendancePct != null && stats.attendancePct < 80 ? 'warn' : 'default'}
-        />
-        <GroupKpiCard
-          label="Payroll (net)"
-          value={formatCurrency(stats.payrollNet, currency)}
-          sub="approved & paid runs"
-          icon={Banknote}
-        />
-        <GroupKpiCard
-          label="Emails"
-          value={stats.emailsInPeriod}
-          sub={`last ${periodDays}d`}
-          icon={Mail}
-        />
-      </div>
-
-      {/* Recent activity */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b border-slate-800">
-          <div>
-            <h2 className="text-sm font-bold text-white">Recent activity</h2>
-            <p className="text-xs text-slate-400 mt-0.5">The last 25 changes at this company</p>
-          </div>
-          <Link
-            to={`/group/activity?companyId=${company.id}`}
-            className="text-[11px] font-semibold text-blue-400 hover:text-blue-300"
-          >
-            View all
-          </Link>
-        </div>
-
-        {recentActivity.length === 0 ? (
-          <div className="p-10 text-center text-xs text-slate-500">
-            No activity recorded for this company yet.
-          </div>
-        ) : (
-          recentActivity.map((log) => <ActivityRow key={log.id} log={log} />)
-        )}
-      </div>
+      )}
     </div>
   )
 }

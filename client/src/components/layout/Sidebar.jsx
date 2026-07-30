@@ -78,6 +78,11 @@ const NAV = [
         permission: 'attendance.view',
       },
       {
+        label: 'Attendance Register',
+        to: '/hr/attendance/register',
+        permission: 'attendance.view',
+      },
+      {
         label: 'Holidays',
         to: '/hr/attendance/holidays',
         permission: 'attendance.view',

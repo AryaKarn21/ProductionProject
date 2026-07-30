@@ -110,61 +110,65 @@ export default function AttendanceRegister() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={department}
-            onChange={(e) => setDepartment(e.target.value)}
-            className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-          >
-            <option value="">All departments</option>
-            {departments.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
-
-          <select
-            value={span}
-            onChange={(e) => setSpan(Number(e.target.value))}
-            className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-          >
-            <option value={1}>1 month</option>
-            <option value={2}>2 months</option>
-            <option value={3}>3 months</option>
-          </select>
-
-          <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-lg p-1">
-            <button
-              onClick={() => shiftMonth(-1)}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              title="Previous month"
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 flex-1 sm:flex-none min-w-0">
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="flex-1 sm:flex-none min-w-0 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
             >
-              <ChevronLeft size={14} />
-            </button>
-            <span className="text-[11px] font-semibold text-slate-300 px-1 tabular-nums">
-              {endMonth}
-            </span>
-            <button
-              onClick={() => shiftMonth(1)}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              title="Next month"
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+
+            <select
+              value={span}
+              onChange={(e) => setSpan(Number(e.target.value))}
+              className="flex-1 sm:flex-none min-w-0 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
             >
-              <ChevronRight size={14} />
-            </button>
+              <option value={1}>1 month</option>
+              <option value={2}>2 months</option>
+              <option value={3}>3 months</option>
+            </select>
+
+            <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-lg p-1 shrink-0">
+              <button
+                onClick={() => shiftMonth(-1)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                title="Previous month"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-[11px] font-semibold text-slate-300 px-1 tabular-nums">
+                {endMonth}
+              </span>
+              <button
+                onClick={() => shiftMonth(1)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                title="Next month"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
 
-          <button
-            onClick={handleExportCsv}
-            disabled={!data?.employees?.length}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 disabled:opacity-40"
-          >
-            <Download size={13} /> CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700"
-          >
-            <Printer size={13} /> Print
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleExportCsv}
+              disabled={!data?.employees?.length}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 disabled:opacity-40"
+            >
+              <Download size={13} /> CSV
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700"
+            >
+              <Printer size={13} /> Print
+            </button>
+          </div>
         </div>
       </div>
 
@@ -206,12 +210,15 @@ export default function AttendanceRegister() {
               </div>
 
               {/* Register table */}
+              <p className="sm:hidden text-[11px] text-slate-500 flex items-center gap-1">
+                <ChevronLeft size={11} /> Scroll to see all days <ChevronRight size={11} />
+              </p>
               <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="text-left text-[11px] border-collapse">
                     <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider">
                       <tr>
-                        <th className="sticky left-0 z-10 bg-slate-950/95 p-2.5 border-b border-r border-slate-800 min-w-[180px]">
+                        <th className="sticky left-0 z-10 bg-slate-950/95 p-2.5 border-b border-r border-slate-800 min-w-[130px] sm:min-w-[180px]">
                           Employee
                         </th>
                         {data.months.map((m) => (
@@ -246,7 +253,7 @@ export default function AttendanceRegister() {
                     <tbody className="divide-y divide-slate-800/40">
                       {data.employees.map((row) => (
                         <tr key={row.employee.id} className="hover:bg-slate-800/20">
-                          <td className="sticky left-0 z-10 bg-slate-900 group-hover:bg-slate-800/20 p-2 border-r border-slate-800 flex items-center gap-2 min-w-[180px]">
+                          <td className="sticky left-0 z-10 bg-slate-900 group-hover:bg-slate-800/20 p-2 border-r border-slate-800 flex items-center gap-2 min-w-[130px] sm:min-w-[180px]">
                             <Avatar src={row.employee.avatar} name={row.employee.name} size="xs" />
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-200 truncate">{row.employee.name}</p>
