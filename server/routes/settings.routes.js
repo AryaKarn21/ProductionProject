@@ -8,6 +8,7 @@ import { logFromRequest, diffChanges } from '../utils/audit.js'
 import { normalizePermissions } from '../config/permissions.js'
 import { assertNoCycle, invalidateCompanyTree, getCompanyTree, getRoleScopeIds } from '../utils/companyTree.js'
 import { withoutAutoAudit } from '../middleware/requestContext.js'
+import { requireParentSuperAdmin, isCompanyInScope } from '../middleware/companyRank.js'
 
 const router = express.Router()
 
@@ -261,7 +262,13 @@ router.get(
 
 router.post(
   '/companies',
-  authorize('super_admin'),
+  /*
+   * Was authorize('super_admin'), which let a CHILD company's super
+   * admin register new companies on the platform. Creating a company
+   * is a parent-company act, so the gate is now rank-aware: root
+   * company AND super admin. Everyone else gets 403.
+   */
+  requireParentSuperAdmin,
   validate({
     name: rules.string({ required: true, min: 2, max: 150 }),
     type: rules.string({ max: 50 }),
@@ -311,6 +318,20 @@ router.post(
           await t.rollback()
           return res.status(400).json({ message: 'The selected parent company does not exist.' })
         }
+
+        /*
+         * Rank alone is not enough. Without this check, the super admin
+         * of parent group A could attach a new company underneath parent
+         * group B — both callers pass requireParentSuperAdmin, because
+         * both are root-company super admins. This is what keeps two
+         * unrelated groups on the same platform apart.
+         */
+        if (!(await isCompanyInScope(req, parentId))) {
+          await t.rollback()
+          return res.status(403).json({
+            message: 'You can only create companies inside your own group.',
+          })
+        }
       }
 
       const company = await withoutAutoAudit(() =>
@@ -356,15 +377,22 @@ router.post(
 router.patch(
   '/companies/:id',
   validateUuidParam('id'),
-  authorize('super_admin', 'admin'),
+  /*
+   * Was authorize('super_admin', 'admin'), which let ANY company's admin
+   * edit their own company record. Company management now belongs to the
+   * parent company's super admin only.
+   */
+  requireParentSuperAdmin,
   async (req, res, next) => {
     try {
       const company = await Company.findByPk(req.params.id)
       if (!company) return res.status(404).json({ message: 'Department not found' })
 
-      // An admin may only edit their own company.
-      if (req.user.role !== 'super_admin' && String(company.id) !== String(req.companyId)) {
-        return res.status(403).json({ message: 'You cannot edit this company.' })
+      // The target must be the caller's own company or one beneath it.
+      // Replaces the old "admin may only edit their own company" check,
+      // which no longer applies now that admins cannot reach this route.
+      if (!(await isCompanyInScope(req, company.id))) {
+        return res.status(403).json({ message: 'That company is not in your group.' })
       }
 
       const before = company.toJSON()
@@ -405,7 +433,7 @@ router.patch(
 router.delete(
   '/companies/:id',
   validateUuidParam('id'),
-  authorize('super_admin'),
+  requireParentSuperAdmin,
   async (req, res, next) => {
     const t = await sequelize.transaction()
     try {
@@ -413,6 +441,11 @@ router.delete(
       if (!company) {
         await t.rollback()
         return res.status(404).json({ message: 'Company not found' })
+      }
+
+      if (!(await isCompanyInScope(req, company.id))) {
+        await t.rollback()
+        return res.status(403).json({ message: 'That company is not in your group.' })
       }
 
       // Refuse to orphan data. The old version hard-deleted the company

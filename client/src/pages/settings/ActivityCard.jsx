@@ -13,8 +13,15 @@ import { Link } from "react-router-dom";
 
 import Badge from "@/components/ui/Badge";
 import Can from "@/components/shared/Can";
+import useCompanyScope from "@/hooks/useCompanyScope";
 
 export default function ActivityCard({ user }) {
+  // The audit log is now a parent-company surface, so the link into it
+  // has to be gated the same way. Leaving it visible would send a
+  // child-company user to a Settings tab that no longer exists for
+  // them, landing them on the Users tab with no explanation.
+  const { isParentCompany } = useCompanyScope();
+
   const activities = [
     {
       icon: LogIn,
@@ -167,15 +174,17 @@ export default function ActivityCard({ user }) {
           auditlog.view: without the guard this would have sent an
           ordinary employee to a tab that immediately 403s.
         */}
-        <Can permission="auditlog.view">
-          <Link
-            to="/settings?tab=audit"
-            className="text-[13px] font-medium transition-colors hover:underline"
-            style={{ color: "var(--primary)" }}
-          >
-            View Full Activity Log
-          </Link>
-        </Can>
+        {isParentCompany && (
+          <Can permission="auditlog.view">
+            <Link
+              to="/settings?tab=audit"
+              className="text-[13px] font-medium transition-colors hover:underline"
+              style={{ color: "var(--primary)" }}
+            >
+              View Full Activity Log
+            </Link>
+          </Can>
+        )}
       </div>
     </div>
   );

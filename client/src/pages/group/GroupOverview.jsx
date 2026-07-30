@@ -11,6 +11,10 @@ import {
   AlertTriangle,
   Activity,
   ArrowUpRight,
+  UserCheck,
+  CalendarCheck,
+  Banknote,
+  Mail,
 } from 'lucide-react'
 import { groupAPI } from '@/api/group.api'
 import { formatCurrency } from '@/lib/utils'
@@ -48,7 +52,7 @@ export default function GroupOverview() {
     return (
       <div className="space-y-6 p-4 sm:p-6 max-w-[1600px] mx-auto w-full">
         <div className="h-16 rounded-xl bg-slate-900/50 border border-slate-800 animate-pulse" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
@@ -95,7 +99,7 @@ export default function GroupOverview() {
           </p>
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-lg p-1">
+        <div className="flex flex-wrap items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-lg p-1">
           {PERIODS.map((p) => (
             <button
               key={p.value}
@@ -117,7 +121,7 @@ export default function GroupOverview() {
       ) : (
         <>
           {/* Group totals */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <GroupKpiCard
               label="Companies"
               value={totals.childCompanies}
@@ -175,6 +179,40 @@ export default function GroupOverview() {
               sub={`${totals.newLeads} new leads in period`}
               icon={Activity}
             />
+
+            <GroupKpiCard
+              label="Users"
+              value={totals.users}
+              sub="active seats, group-wide"
+              icon={UserCheck}
+            />
+            <GroupKpiCard
+              label="Clients"
+              value={totals.clients}
+              sub={`${totals.vendors} vendors on file`}
+              icon={Users}
+            />
+            <GroupKpiCard
+              label="Attendance"
+              value={totals.attendancePct != null ? `${totals.attendancePct}%` : '—'}
+              sub={`present, last ${days}d`}
+              icon={CalendarCheck}
+              tone={
+                totals.attendancePct != null && totals.attendancePct < 80 ? 'warn' : 'default'
+              }
+            />
+            <GroupKpiCard
+              label="Payroll (net)"
+              value={formatCurrency(totals.payrollNet, currency)}
+              sub="approved & paid runs"
+              icon={Banknote}
+            />
+            <GroupKpiCard
+              label={`Emails (${days}d)`}
+              value={totals.emailsInPeriod}
+              sub="sent & received, group-wide"
+              icon={Mail}
+            />
           </div>
 
           {/* Per-company breakdown */}
@@ -200,18 +238,21 @@ export default function GroupOverview() {
                   <tr>
                     <th className="p-3.5">Company</th>
                     <th className="p-3.5 text-right">Staff</th>
+                    <th className="p-3.5 text-right">Users</th>
                     <th className="p-3.5 text-right">Leads</th>
+                    <th className="p-3.5 text-right">Clients</th>
                     <th className="p-3.5 text-right">Pipeline</th>
                     <th className="p-3.5 text-right">Pending expenses</th>
                     <th className="p-3.5 text-right">Projects</th>
                     <th className="p-3.5 text-right">Open tickets</th>
+                    <th className="p-3.5 text-right">Attendance</th>
                     <th className="p-3.5 text-right">Changes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
                   {children.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-10 text-slate-500">
+                      <td colSpan={11} className="text-center py-10 text-slate-500">
                         No child companies to report on.
                       </td>
                     </tr>
@@ -233,12 +274,14 @@ export default function GroupOverview() {
                           )}
                         </td>
                         <td className="p-3.5 text-right tabular-nums">{row.employees}</td>
+                        <td className="p-3.5 text-right tabular-nums">{row.users}</td>
                         <td className="p-3.5 text-right tabular-nums">
                           {row.leads}
                           {row.newLeads > 0 && (
                             <span className="text-emerald-400 ml-1">+{row.newLeads}</span>
                           )}
                         </td>
+                        <td className="p-3.5 text-right tabular-nums">{row.clients}</td>
                         <td className="p-3.5 text-right tabular-nums">
                           {formatCurrency(row.pipelineValue, currency)}
                         </td>
@@ -266,6 +309,15 @@ export default function GroupOverview() {
                           }`}
                         >
                           {row.ticketsOpen}
+                        </td>
+                        <td
+                          className={`p-3.5 text-right tabular-nums ${
+                            row.attendancePct != null && row.attendancePct < 80
+                              ? 'text-amber-400'
+                              : ''
+                          }`}
+                        >
+                          {row.attendancePct != null ? `${row.attendancePct}%` : '—'}
                         </td>
                         <td className="p-3.5 text-right tabular-nums text-slate-400">
                           {row.changes}

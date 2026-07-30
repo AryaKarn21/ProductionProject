@@ -2,6 +2,7 @@ import express from 'express'
 import { Op } from 'sequelize'
 import { AuditLog, User } from '../models/index.js'
 import { protect, can } from '../middleware/auth.js'
+import { requireParentCompany } from '../middleware/companyRank.js'
 
 const router = express.Router()
 
@@ -14,6 +15,26 @@ const router = express.Router()
 |
 | This honours the permission AND keeps the existing role check, so no
 | account that can read the audit log today loses access.
+*/
+/*
+|--------------------------------------------------------------------------
+| Parent company only
+|--------------------------------------------------------------------------
+|
+| requireParentCompany is added to all three routes below. The audit log
+| is a group-oversight surface: it is where you go to answer "who changed
+| what, and when" across the organisation. A child company does not get
+| that view of itself — the parent company holds it.
+|
+| Note this is requireParentCompany, NOT requireParentSuperAdmin: any
+| parent-company role that has been granted auditlog.view keeps its
+| access. To narrow it to the super admin alone, swap the import and the
+| three usages for requireParentSuperAdmin — the two guards have
+| identical signatures, so nothing else changes.
+|
+| The guard runs BEFORE requireAudit so a child company gets one clean
+| "parent company only" 403 rather than a misleading "you lack
+| auditlog.view" message for a permission they may well hold.
 */
 const requireAudit = (permission) => (req, res, next) => {
   if (req.user?.role === 'super_admin' || req.user?.role === 'admin') return next()
@@ -64,7 +85,7 @@ function buildWhere(req) {
 
 
 // ── List (filters + pagination) ──
-router.get('/', protect, requireAudit('auditlog.view'), async (req, res, next) => {
+router.get('/', protect, requireParentCompany, requireAudit('auditlog.view'), async (req, res, next) => {
   try {
     const { page = 1, limit = 20 } = req.query
     const where = buildWhere(req)
@@ -84,7 +105,7 @@ router.get('/', protect, requireAudit('auditlog.view'), async (req, res, next) =
 })
 
 // ── Stats (for the Audit Log dashboard) ──
-router.get('/stats', protect, requireAudit('auditlog.view'), async (req, res, next) => {
+router.get('/stats', protect, requireParentCompany, requireAudit('auditlog.view'), async (req, res, next) => {
   try {
     const where = {}
     if (req.companyId) where.companyId = req.companyId
@@ -113,7 +134,7 @@ router.get('/stats', protect, requireAudit('auditlog.view'), async (req, res, ne
 })
 
 // ── CSV export (matches the zero-dependency CSV pattern used elsewhere in the app) ──
-router.get('/export', protect, requireAudit('auditlog.export'), async (req, res, next) => {
+router.get('/export', protect, requireParentCompany, requireAudit('auditlog.export'), async (req, res, next) => {
   try {
     const where = buildWhere(req)
 

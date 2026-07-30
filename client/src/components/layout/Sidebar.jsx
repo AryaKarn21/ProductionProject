@@ -14,6 +14,7 @@ import { cn, getInitials } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import CompanySwitcher from './CompanySwitcher'
 import usePermission from '@/hooks/usePermission'
+import useCompanyScope from '@/hooks/useCompanyScope'
 import { groupAPI } from '@/api/group.api'
 
 const NAV = [
@@ -74,6 +75,11 @@ const NAV = [
       {
         label: 'Attendance',
         to: '/hr/attendance',
+        permission: 'attendance.view',
+      },
+      {
+        label: 'Attendance Register',
+        to: '/hr/attendance/register',
         permission: 'attendance.view',
       },
       {
@@ -269,6 +275,7 @@ export default function Sidebar() {
   const isMobile = useIsMobile()
   const location = useLocation()
   const { hasPermission, isSuperAdmin } = usePermission()
+  const { isParentSuperAdmin } = useCompanyScope()
 
   /*
    * Does the active company actually have child companies?
@@ -278,16 +285,38 @@ export default function Sidebar() {
    * is no, because they are the one who sets up the hierarchy and would
    * otherwise have no way to reach the screen that explains how.
    */
+  /*
+   * Only the parent company's super admin can reach /api/group/* at all
+   * now (server/middleware/companyRank.js), so `enabled` is narrowed to
+   * match. Without that, every child-company user fired a request on
+   * each page load that could only ever come back 403.
+   */
   const { data: groupScope } = useQuery({
     queryKey: ['group-scope'],
     queryFn: () => groupAPI.getScope().then((r) => r.data),
-    enabled: hasPermission('group.view'),
+    enabled: isParentSuperAdmin && hasPermission('group.view'),
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
 
+  /*
+   * The Group Console is parent-company-only.
+   *
+   * isParentSuperAdmin is checked FIRST and is not something a super
+   * admin can bypass: switching into a child company makes it false,
+   * which is the intended behaviour — the child's dashboard must not
+   * show group-level menus regardless of who is looking at it.
+   *
+   * The childCount clause is kept for the remaining case: a parent
+   * company that has not been given any children yet would open a
+   * console with nothing in it. A super admin still sees the menu there,
+   * because they are the one who sets the hierarchy up and would
+   * otherwise have no route to the screen that explains how.
+   */
   const showGroupConsole =
-    hasPermission('group.view') && (isSuperAdmin || (groupScope?.childCount ?? 0) > 0)
+    isParentSuperAdmin &&
+    hasPermission('group.view') &&
+    (isSuperAdmin || (groupScope?.childCount ?? 0) > 0)
 
   const filteredNav = NAV.reduce((result, item) => {
     if (item.groupOnly && !showGroupConsole) return result

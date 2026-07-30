@@ -17,7 +17,17 @@ export default function ActivityRow({ log }) {
 
   const { verb, noun } = parseAction(log)
   const fields = changedFields(log)
-  const hasDetail = log.changes && Object.keys(log.changes).length > 0
+
+  // Guard against malformed `changes` data (e.g. a raw string instead of
+  // an object, which would otherwise be iterated character-by-character
+  // via Object.entries and render as a garbage "0, 1, 2..." list). Only
+  // treat it as expandable detail when it's an actual, non-array object
+  // with at least one key.
+  const isPlainObject =
+    log.changes !== null &&
+    typeof log.changes === 'object' &&
+    !Array.isArray(log.changes)
+  const hasDetail = isPlainObject && Object.keys(log.changes).length > 0
 
   return (
     <div className="border-b border-slate-800/60 last:border-b-0">
@@ -133,7 +143,13 @@ function ChangeDetail({ changes, log }) {
 
   const entries = isSnapshot
     ? Object.entries(snapshot).filter(([, v]) => v !== null && v !== '')
-    : Object.entries(changes)
+    // Only real { field: { before, after } } rows belong here. If a value
+    // isn't a plain object (the shape a string produces when iterated by
+    // Object.entries), it's not a genuine diff row — drop it rather than
+    // render a meaningless before/after pair.
+    : Object.entries(changes).filter(
+        ([, v]) => v !== null && typeof v === 'object' && !Array.isArray(v)
+      )
 
   return (
     <div className="px-3.5 pb-3.5 pl-[54px]">

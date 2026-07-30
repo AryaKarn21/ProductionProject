@@ -47,6 +47,36 @@ export const employeesAPI = {
       headers: { "Content-Type": "multipart/form-data" },
     }),
 
+  // ── Background: education & past work experience ───────────
+  //
+  // getBackground returns BOTH collections plus the server-computed
+  // summary (total experience, highest qualification, how many rows
+  // still need verifying). Use it rather than calling getEducations +
+  // getExperiences and adding things up in the browser — that would be
+  // a second implementation of the maths that can disagree with the
+  // server's.
+  getBackground: (id) => api.get(`/employees/${id}/background`),
+
+  getEducations: (id) => api.get(`/employees/${id}/educations`),
+  addEducation: (id, data) => api.post(`/employees/${id}/educations`, data),
+  updateEducation: (id, eduId, data) =>
+    api.patch(`/employees/${id}/educations/${eduId}`, data),
+  deleteEducation: (id, eduId) =>
+    api.delete(`/employees/${id}/educations/${eduId}`),
+  // Separate endpoint, not a field on update: verification stamps who
+  // and when, and requires admin/manager.
+  verifyEducation: (id, eduId, isVerified = true) =>
+    api.patch(`/employees/${id}/educations/${eduId}/verify`, { isVerified }),
+
+  getExperiences: (id) => api.get(`/employees/${id}/experiences`),
+  addExperience: (id, data) => api.post(`/employees/${id}/experiences`, data),
+  updateExperience: (id, expId, data) =>
+    api.patch(`/employees/${id}/experiences/${expId}`, data),
+  deleteExperience: (id, expId) =>
+    api.delete(`/employees/${id}/experiences/${expId}`),
+  verifyExperience: (id, expId, isVerified = true) =>
+    api.patch(`/employees/${id}/experiences/${expId}/verify`, { isVerified }),
+
   // ── Daily Reports ──────────────────────────────────────────
   getDailyReports: (id) => api.get(`/employees/${id}/daily-reports`),
   addDailyReport: (id, data) =>

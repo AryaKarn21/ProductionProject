@@ -1,4 +1,5 @@
 import Chart from "react-apexcharts";
+import { formatCurrency } from "@/lib/utils";
 
 export default function IncomeSourceChart({ data = [] }) {
   const labels = data.length > 0
@@ -14,7 +15,7 @@ export default function IncomeSourceChart({ data = [] }) {
     labels,
     legend: { position: "bottom" },
     dataLabels: { enabled: true },
-    tooltip: { y: { formatter: (value) => `$${value.toLocaleString()}` } },
+    tooltip: { y: { formatter: (value) => formatCurrency(value) } },
     responsive: [{ breakpoint: 768, options: { chart: { width: "100%" }, legend: { position: "bottom" } } }],
   };
 

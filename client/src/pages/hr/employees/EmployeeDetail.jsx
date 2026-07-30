@@ -50,6 +50,7 @@ import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
 import StatCard from "@/components/shared/StatCard";
 import { Tabs } from "@/components/ui/Tabs";
+import BackgroundTab from "./BackgroundTab";
 
 import { classifyStatus, formatCurrency, formatDate } from "@/lib/utils";
 
@@ -557,6 +558,7 @@ export default function EmployeeDetail() {
     { key: "leaves", label: "Leave History", count: stats?.leave?.total ?? 0 },
     { key: "payslips", label: "Payroll" },
     { key: "salary", label: "Salary" },
+    { key: "background", label: "Background" },
     { key: "documents", label: "Documents" },
     { key: "reports", label: "Daily Reports", count: dailyReports?.reports?.length },
     { key: "performance", label: "Performance", count: stats?.performance?.totalReviews ?? 0 },
@@ -971,6 +973,13 @@ export default function EmployeeDetail() {
                 )}
 
                 {/* ================= DOCUMENTS ================= */}
+                {/* Education + previous employment. Self-contained:
+                    it fetches its own data and owns its modals, so this
+                    page only needs the one line. */}
+                {activeTab === "background" && (
+                  <BackgroundTab employeeId={id} />
+                )}
+
                 {activeTab === "documents" && (
                   <div className="space-y-5">
                     <div className="flex items-center justify-between">

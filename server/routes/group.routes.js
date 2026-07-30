@@ -3,7 +3,9 @@ import { Op, fn, col, literal } from 'sequelize'
 import {
   AuditLog,
   User,
+  UserCompany,
   Company,
+  Account,
   Lead,
   Opportunity,
   Employee,
@@ -14,9 +16,14 @@ import {
   Leave,
   PurchaseOrder,
   InventoryItem,
+  Attendance,
+  PayrollRun,
+  Vendor,
+  Email,
 } from '../models/index.js'
 import { authorizePermission } from '../middleware/auth.js'
 import { resolveGroupScope, narrowScope } from '../middleware/groupScope.js'
+import { requireParentSuperAdmin } from '../middleware/companyRank.js'
 import { getCompanyTree } from '../utils/companyTree.js'
 import { parsePagination } from '../middleware/validate.js'
 
@@ -50,7 +57,26 @@ const router = express.Router()
 // Applied to every route below. Order matters: authorizePermission runs
 // the super_admin bypass and the RBAC check, then resolveGroupScope
 // works out which companies are actually in scope.
-router.use(authorizePermission('group.view'), resolveGroupScope)
+/*
+ * Order matters, and this order is deliberate:
+ *
+ *   requireParentSuperAdmin  is this a ROOT company, and a super admin?
+ *   authorizePermission      does RBAC still grant group.view?
+ *   resolveGroupScope        which companies are actually in scope?
+ *
+ * The rank gate goes FIRST so a child company gets one clean 403 rather
+ * than sailing through the super_admin bypass inside
+ * authorizePermission() and being caught further down. Because this is
+ * router.use(), every route below is covered — including the CSV export
+ * and the per-company drill-down.
+ *
+ * Note that a super admin who has SWITCHED INTO a child company is
+ * refused here. Their role has not changed, but the tenant they are
+ * acting in has, and the whole point of the rule is that a child
+ * company's dashboard does not expose group-level surfaces. They switch
+ * back to the parent company to use this console.
+ */
+router.use(requireParentSuperAdmin, authorizePermission('group.view'), resolveGroupScope)
 
 /** Shapes a company row for the client, always with a resolvable name. */
 const companyLabel = (req, companyId) => {
@@ -163,7 +189,9 @@ router.get('/overview', async (req, res, next) => {
           'openOpportunities', 'pipelineValue', 'wonValue', 'employees',
           'expensePending', 'expenseApproved', 'projectsActive',
           'projectsOverdue', 'tasksOpen', 'ticketsOpen', 'leavesPending',
-          'purchaseOrdersPending', 'changes',
+          'purchaseOrdersPending', 'purchaseOrdersTotal', 'changes',
+          'users', 'clients', 'vendors', 'attendancePresent',
+          'attendanceMarked', 'payrollNet', 'emailsInPeriod',
         ].map((k) => [k, 0])
       )
 
@@ -195,9 +223,17 @@ router.get('/overview', async (req, res, next) => {
       ticketsOpen,
       leavesPending,
       poPending,
+      poTotal,
       stockValue,
       newLeadsInPeriod,
       changesInPeriod,
+      users,
+      clients,
+      vendors,
+      attendancePresent,
+      attendanceMarked,
+      payrollNet,
+      emailsInPeriod,
     ] = await Promise.all([
       countByCompany(Lead, ids),
       countByCompany(Opportunity, ids, {
@@ -225,9 +261,25 @@ router.get('/overview', async (req, res, next) => {
         // lowercase, and a value outside it never matches in MySQL.
         status: { [Op.in]: ['draft', 'pending'] },
       }),
+      countByCompany(PurchaseOrder, ids),
       sumByCompany(InventoryItem, 'quantity', ids),
       countByCompany(Lead, ids, { createdAt: { [Op.gte]: since } }),
       countByCompany(AuditLog, ids, { createdAt: { [Op.gte]: since } }),
+      // Active users per company, via the membership table rather than
+      // User.companyId, since one person can hold seats in several
+      // companies and User.companyId only records their "home" one.
+      countByCompany(UserCompany, ids, { isActive: true }),
+      countByCompany(Account, ids, { type: 'Customer' }),
+      countByCompany(Vendor, ids, { isActive: true }),
+      countByCompany(Attendance, ids, {
+        status: 'present',
+        date: { [Op.gte]: since },
+      }),
+      countByCompany(Attendance, ids, { date: { [Op.gte]: since } }),
+      sumByCompany(PayrollRun, 'netPay', ids, {
+        status: { [Op.in]: ['approved', 'paid'] },
+      }),
+      countByCompany(Email, ids, { createdAt: { [Op.gte]: since } }),
     ])
 
     // Per-company rows, so the parent can see which child is which.
@@ -248,8 +300,19 @@ router.get('/overview', async (req, res, next) => {
       ticketsOpen: ticketsOpen[id] || 0,
       leavesPending: leavesPending[id] || 0,
       purchaseOrdersPending: poPending[id] || 0,
+      purchaseOrdersTotal: poTotal[id] || 0,
       stockUnits: stockValue[id] || 0,
       changes: changesInPeriod[id] || 0,
+      users: users[id] || 0,
+      clients: clients[id] || 0,
+      vendors: vendors[id] || 0,
+      // Percentage, not a raw count: a 40-person company and a 4-person
+      // company both belong on the same 0-100 scale on a card.
+      attendancePct: attendanceMarked[id]
+        ? Math.round(((attendancePresent[id] || 0) / attendanceMarked[id]) * 100)
+        : null,
+      payrollNet: payrollNet[id] || 0,
+      emailsInPeriod: emailsInPeriod[id] || 0,
     }))
 
     res.json({
@@ -273,7 +336,19 @@ router.get('/overview', async (req, res, next) => {
         ticketsOpen: sumAll(ticketsOpen),
         leavesPending: sumAll(leavesPending),
         purchaseOrdersPending: sumAll(poPending),
+        purchaseOrdersTotal: sumAll(poTotal),
         changes: sumAll(changesInPeriod),
+        users: sumAll(users),
+        clients: sumAll(clients),
+        vendors: sumAll(vendors),
+        // Weighted across the whole group, not an average of per-company
+        // percentages — a 4-person and a 400-person company shouldn't
+        // count equally.
+        attendancePct: sumAll(attendanceMarked)
+          ? Math.round((sumAll(attendancePresent) / sumAll(attendanceMarked)) * 100)
+          : null,
+        payrollNet: sumAll(payrollNet),
+        emailsInPeriod: sumAll(emailsInPeriod),
       },
       byCompany,
     })
@@ -549,7 +624,14 @@ router.get('/companies/:id', async (req, res, next) => {
 
     const id = String(req.params.id)
 
-    const [company, leads, employees, projects, tickets, pipeline, expenses, recent] =
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365)
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    const [
+      company, leads, employees, projects, tickets, pipeline, expenses, recent,
+      users, clients, vendors, poPending, poTotal, attendancePresent,
+      attendanceMarked, payrollNet, emailsInPeriod,
+    ] =
       await Promise.all([
         Company.findByPk(id, {
           include: [{ model: Company, as: 'parent', attributes: ['id', 'name'] }],
@@ -570,12 +652,29 @@ router.get('/companies/:id', async (req, res, next) => {
           order: [['createdAt', 'DESC']],
           limit: 25,
         }),
+        countByCompany(UserCompany, scope, { isActive: true }),
+        countByCompany(Account, scope, { type: 'Customer' }),
+        countByCompany(Vendor, scope, { isActive: true }),
+        countByCompany(PurchaseOrder, scope, {
+          status: { [Op.in]: ['draft', 'pending'] },
+        }),
+        countByCompany(PurchaseOrder, scope),
+        countByCompany(Attendance, scope, {
+          status: 'present',
+          date: { [Op.gte]: since },
+        }),
+        countByCompany(Attendance, scope, { date: { [Op.gte]: since } }),
+        sumByCompany(PayrollRun, 'netPay', scope, {
+          status: { [Op.in]: ['approved', 'paid'] },
+        }),
+        countByCompany(Email, scope, { createdAt: { [Op.gte]: since } }),
       ])
 
     if (!company) return res.status(404).json({ message: 'Company not found' })
 
     res.json({
       company,
+      periodDays: days,
       stats: {
         leads: leads[id] || 0,
         employees: employees[id] || 0,
@@ -583,6 +682,16 @@ router.get('/companies/:id', async (req, res, next) => {
         ticketsOpen: tickets[id] || 0,
         pipelineValue: pipeline[id] || 0,
         expensePending: expenses[id] || 0,
+        users: users[id] || 0,
+        clients: clients[id] || 0,
+        vendors: vendors[id] || 0,
+        purchaseOrdersPending: poPending[id] || 0,
+        purchaseOrdersTotal: poTotal[id] || 0,
+        attendancePct: attendanceMarked[id]
+          ? Math.round(((attendancePresent[id] || 0) / attendanceMarked[id]) * 100)
+          : null,
+        payrollNet: payrollNet[id] || 0,
+        emailsInPeriod: emailsInPeriod[id] || 0,
       },
       recentActivity: recent.map((log) => shapeActivity(req, log)),
     })

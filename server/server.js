@@ -36,6 +36,7 @@ import groupRoutes from "./routes/group.routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
 import { resolveCompany } from "./middleware/tenant.js";
+import { resolveCompanyRank } from "./middleware/companyRank.js";
 import { requestContext } from "./middleware/requestContext.js";
 import meetingsRoutes from "./routes/meetings.routes.js";
 import meetingAttendeeRoutes from "./routes/meetingAttendees.routes.js";
@@ -313,7 +314,13 @@ app.use(
 | req.companyId does not exist yet and audit rows would be stamped with
 | the user's home company instead of the one they are working in.
 */
-const tenantChain = [protect, resolveCompany, requestContext];
+// resolveCompanyRank MUST come after resolveCompany: it reads
+// req.companyId to decide whether this request is operating inside a
+// parent (root) company or a child, and writes the result to
+// req.isParentCompany / req.isParentSuperAdmin. It only sets flags and
+// never rejects a request on its own, so mounting it globally here
+// changes the behaviour of no existing route.
+const tenantChain = [protect, resolveCompany, requestContext, resolveCompanyRank];
 
 app.use("/api/auth", authRoutes);
 
