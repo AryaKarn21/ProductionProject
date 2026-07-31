@@ -254,6 +254,71 @@ disconnectGoogle: async () => {
     return data;
   },
 
+  getHistory: async (params = {}) => {
+    const { data } = await api.get(
+      "/email/history",
+      { params }
+    );
+
+    return data;
+  },
+
+  getRelatedEmails: async (params = {}) => {
+    const { data } = await api.get(
+      "/email/related",
+      { params }
+    );
+
+    return data;
+  },
+
+  // ============================================================
+  // TEMPLATES
+  // ============================================================
+
+  getTemplates: async (params = {}) => {
+    const { data } = await api.get(
+      "/email/templates",
+      { params }
+    );
+
+    return data;
+  },
+
+  getTemplate: async (id) => {
+    const { data } = await api.get(
+      `/email/templates/${id}`
+    );
+
+    return data;
+  },
+
+  createTemplate: async (payload) => {
+    const { data } = await api.post(
+      "/email/templates",
+      payload
+    );
+
+    return data;
+  },
+
+  updateTemplate: async (id, payload) => {
+    const { data } = await api.patch(
+      `/email/templates/${id}`,
+      payload
+    );
+
+    return data;
+  },
+
+  deleteTemplate: async (id) => {
+    const { data } = await api.delete(
+      `/email/templates/${id}`
+    );
+
+    return data;
+  },
+
   // ============================================================
   // COMPOSE
   // ============================================================

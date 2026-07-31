@@ -16,7 +16,11 @@ export const groupAPI = {
    */
   getScope: () => api.get('/group/scope'),
 
-  /** Group-wide KPIs and the per-company breakdown table. */
+  /**
+   * Group-wide KPIs and the per-company breakdown table.
+   * `params.pnlPeriod` (today | week | month | quarter | year) filters the
+   * Profit/Loss column independently of `params.days`.
+   */
   getOverview: (params) => api.get('/group/overview', { params }),
 
   /** Chronological cross-company activity feed. */

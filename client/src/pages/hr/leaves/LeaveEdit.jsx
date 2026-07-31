@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 
 import { leavesAPI } from "@/api/leaves.api";
 import { employeesAPI } from "@/api/employees.api";
+import { useAuthStore } from "@/store/auth.store";
 
 const LEAVE_TYPES = [
   "Annual",
@@ -29,6 +30,8 @@ export default function LeaveEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const isEmployee = user?.role === "employee";
 
   const {
     register,
@@ -133,31 +136,39 @@ export default function LeaveEdit() {
 
         <div className="grid grid-cols-2 gap-4">
 
+          {/* Employee — locked for the Employee role */}
           <div className="form-group">
             <label>Employee *</label>
-
-            <select
-              className="input"
-              {...register("employeeId", {
-                required: "Employee is required",
-              })}
-            >
-              <option value="">Select Employee</option>
-
-              {employees.map((emp) => (
-                <option
-                  key={emp.id}
-                  value={emp.id}
-                >
-                  {emp.firstName} {emp.lastName}
-                </option>
-              ))}
-            </select>
-
+            {isEmployee ? (
+              <div
+                className="input flex items-center gap-2 cursor-not-allowed opacity-70"
+                style={{ background: "var(--surface-2)" }}
+              >
+                {/* Show the currently linked employee name */}
+                {employees.find(e => String(e.id) === String(leave?.employeeId))
+                  ? (() => {
+                      const emp = employees.find(e => String(e.id) === String(leave?.employeeId));
+                      return <span>{emp.firstName} {emp.lastName}</span>;
+                    })()
+                  : <span style={{ color: "var(--text-muted)" }}>Loading…</span>
+                }
+                <input type="hidden" {...register("employeeId", { required: "Employee is required" })} />
+              </div>
+            ) : (
+              <select
+                className="input"
+                {...register("employeeId", { required: "Employee is required" })}
+              >
+                <option value="">Select Employee</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.firstName} {emp.lastName}
+                  </option>
+                ))}
+              </select>
+            )}
             {errors.employeeId && (
-              <p className="text-red-500 text-xs">
-                {errors.employeeId.message}
-              </p>
+              <p className="text-red-500 text-xs">{errors.employeeId.message}</p>
             )}
           </div>
 
@@ -225,23 +236,17 @@ export default function LeaveEdit() {
             )}
           </div>
 
-          <div className="form-group col-span-2">
-            <label>Status</label>
-
-            <select
-              className="input"
-              {...register("status")}
-            >
-              {LEAVE_STATUS.map((status) => (
-                <option
-                  key={status}
-                  value={status}
-                >
-                  {status}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Status — only visible to HR / Admin / Super Admin */}
+          {!isEmployee && (
+            <div className="form-group col-span-2">
+              <label>Status</label>
+              <select className="input" {...register("status")}>
+                {LEAVE_STATUS.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="form-group col-span-2">
             <label>Reason *</label>

@@ -138,6 +138,7 @@ const EmailSpam = lazy(() => import("@/pages/email/Spam"));
 const EmailStarred = lazy(() => import("@/pages/email/Starred"));
 const EmailTrash = lazy(() => import("@/pages/email/Trash"));
 const EmailTemplates = lazy(() => import("@/pages/email/Templates"));
+const EmailHistory = lazy(() => import("@/pages/email/History"));
 const EmailAnalytics = lazy(() => import("@/pages/email/Analytics"));
 const EmailSettings = lazy(() => import("@/pages/email/Settings"));
 
@@ -304,6 +305,7 @@ export const router = createBrowserRouter([
           { path: "/email/starred", element: G("email.view", <EmailStarred />) },
           { path: "/email/trash", element: G("email.view", <EmailTrash />) },
           { path: "/email/templates", element: G("email.view", <EmailTemplates />) },
+          { path: "/email/history", element: G("email.view", <EmailHistory />) },
           { path: "/email/analytics", element: G("email.view", <EmailAnalytics />) },
           { path: "/email/settings", element: G("email.update", <EmailSettings />) },
 

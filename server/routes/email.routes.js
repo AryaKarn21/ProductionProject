@@ -1,4 +1,6 @@
 import express from "express";
+import { Op } from "sequelize";
+import { sequelize } from "../config/db.js";
 
 import { logEvent } from "../utils/audit.js";
 
@@ -20,6 +22,7 @@ import {
   EmailAccount,
   EmailThread,
   EmailAttachment,
+  EmailTemplate,
 } from "../models/Emailmodels.js";
 
 import {
@@ -267,10 +270,17 @@ const buildAttachmentRecords = async (files, emailId, req) => {
   );
 };
 
-const toNodemailerAttachments = (attachmentRecords) =>
-  attachmentRecords.map((a) => ({
-    filename: a.originalName,
-    path: a.storagePath,
+// Builds Nodemailer attachment objects straight from the uploaded files.
+// uploadEmailAttachment uses multer's memoryStorage() (see middleware/emailUpload.js),
+// so files only ever exist as an in-memory `buffer` — there is no `file.path`
+// on disk to read from. Passing `content: file.buffer` gives Nodemailer the
+// actual bytes directly instead of a (non-existent) path, which previously
+// produced attachments with no real content.
+const toNodemailerAttachments = (files) =>
+  (files || []).map((file) => ({
+    filename: file.originalname,
+    content: file.buffer,
+    contentType: file.mimetype,
   }));
 
 // ============================================================
@@ -641,7 +651,7 @@ router.post(
         subject,
         html: bodyHtml || undefined,
         text: bodyText || undefined,
-        attachments: toNodemailerAttachments(attachmentRecords),
+        attachments: toNodemailerAttachments(req.files),
       });
 
       await email.update({
@@ -822,7 +832,7 @@ router.post(
         text: bodyText || undefined,
         inReplyTo: original.messageId || undefined,
         references: original.messageId || undefined,
-        attachments: toNodemailerAttachments(attachmentRecords),
+        attachments: toNodemailerAttachments(req.files),
       });
 
       await email.update({
@@ -937,7 +947,7 @@ router.post(
         subject,
         html: finalBodyHtml,
         text: finalBodyText,
-        attachments: toNodemailerAttachments(attachmentRecords),
+        attachments: toNodemailerAttachments(req.files),
       });
 
       await email.update({
@@ -1047,6 +1057,362 @@ router.get(
       "archive"
     )
   )
+);
+
+// ============================================================
+// RELATED — email history tied to one record (employee, lead, etc.)
+// ============================================================
+// Two ways an email can belong to a record:
+//  1. It was sent FROM the CRM with relatedType/relatedId tagged on it
+//     (e.g. the "Send Email" button on an employee's profile).
+//  2. It's an inbox message from/to that person's address, even if it
+//     was never explicitly linked (a reply they sent back, for example).
+// We match on whichever of these was supplied so both cases are covered.
+
+router.get(
+  "/related",
+
+  handle(async (req, res) => {
+    const { relatedType, relatedId, email, page, limit } = req.query;
+
+    const {
+      page: pageNum,
+      limit: limitNum,
+      offset,
+    } = parsePagination({ page, limit });
+
+    const orConditions = [];
+
+    if (relatedType && relatedId) {
+      orConditions.push({ relatedType, relatedId });
+    }
+
+    if (email && String(email).trim()) {
+      const address = String(email).trim();
+      orConditions.push({ fromAddress: address });
+      orConditions.push(
+        sequelize.where(
+          sequelize.fn("JSON_CONTAINS", sequelize.col("toAddresses"), JSON.stringify(address)),
+          true
+        )
+      );
+      orConditions.push(
+        sequelize.where(
+          sequelize.fn("JSON_CONTAINS", sequelize.col("ccAddresses"), JSON.stringify(address)),
+          true
+        )
+      );
+    }
+
+    if (!orConditions.length) {
+      return res.json({
+        success: true,
+        emails: [],
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      });
+    }
+
+    const where = {
+      [Op.or]: orConditions,
+      ...(req.companyId ? { companyId: req.companyId } : {}),
+    };
+
+    const { rows, count: total } = await Email.findAndCountAll({
+      where,
+      include: [accountInclude(req)],
+      order: [["createdAt", "DESC"]],
+      limit: limitNum,
+      offset,
+      distinct: true,
+    });
+
+    const emails = rows.map((row) => {
+      const plain = typeof row.toJSON === "function" ? row.toJSON() : row;
+      return { ...plain, direction: plain.folder === "sent" ? "sent" : "received" };
+    });
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limitNum);
+
+    return res.json({
+      success: true,
+      emails,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPreviousPage: pageNum > 1,
+      },
+    });
+  })
+);
+
+// ============================================================
+// TEMPLATES
+// ============================================================
+// Registered ahead of the generic "/:id" single-email route further down
+// so "/templates" and "/templates/:id" are never swallowed by it.
+
+// A template is visible to a user if it's shared company-wide, or if
+// they personally own it (isShared: false, ownerId: <user>).
+const templateVisibilityWhere = (req) => ({
+  [Op.or]: [{ isShared: true }, { ownerId: req.user.id }],
+});
+
+router.get(
+  "/templates",
+
+  handle(async (req, res) => {
+    const { search, category } = req.query;
+
+    const where = {
+      ...(req.companyId ? { companyId: req.companyId } : {}),
+
+      [Op.or]: [
+        { isShared: true },
+        { ownerId: req.user.id },
+      ],
+    };
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (search && String(search).trim()) {
+      const term = `%${String(search).trim()}%`;
+      where[Op.and] = [
+        {
+          [Op.or]: [
+            { name: { [Op.iLike]: term } },
+            { subject: { [Op.iLike]: term } },
+          ],
+        },
+      ];
+    }
+
+    const templates = await EmailTemplate.findAll({
+      where,
+      order: [["updatedAt", "DESC"]],
+    });
+
+    return res.json({
+      success: true,
+      templates,
+      total: templates.length,
+    });
+  })
+);
+
+router.get(
+  "/templates/:id",
+
+  handle(async (req, res) => {
+
+    const template = await EmailTemplate.findOne({
+      where: {
+        id: req.params.id,
+        ...(req.companyId ? { companyId: req.companyId } : {}),
+        [Op.or]: [{ isShared: true }, { ownerId: req.user.id }],
+      },
+    });
+
+    if (!template) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Template not found" });
+    }
+
+    return res.json({ success: true, template });
+  })
+);
+
+router.post(
+  "/templates",
+
+  handle(async (req, res) => {
+    const { name, category, subject, bodyHtml, placeholders, isShared } =
+      req.body;
+
+    if (!name || !String(name).trim()) {
+      const error = new Error("Template name is required.");
+      error.status = 400;
+      throw error;
+    }
+
+    const template = await EmailTemplate.create({
+      companyId: req.companyId,
+      createdBy: req.user.id,
+      updatedBy: req.user.id,
+      ownerId: isShared === false ? req.user.id : null,
+      name: String(name).trim(),
+      category: category || null,
+      subject: subject || "",
+      bodyHtml: bodyHtml || "",
+      placeholders: Array.isArray(placeholders) ? placeholders : [],
+      isShared: isShared !== false,
+    });
+
+    await logEvent({
+      companyId: req.companyId,
+      userId: req.user.id,
+      action: "email_template_created",
+      resourceId: template.id,
+      changes: { name: template.name },
+    });
+
+    return res.status(201).json({ success: true, template });
+  })
+);
+
+router.patch(
+  "/templates/:id",
+
+  handle(async (req, res) => {
+
+    const template = await EmailTemplate.findOne({
+      where: {
+        id: req.params.id,
+        ...(req.companyId ? { companyId: req.companyId } : {}),
+        [Op.or]: [{ isShared: true }, { ownerId: req.user.id }],
+      },
+    });
+
+    if (!template) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Template not found" });
+    }
+
+    const { name, category, subject, bodyHtml, placeholders, isShared } =
+      req.body;
+
+    await template.update({
+      updatedBy: req.user.id,
+      ...(name !== undefined ? { name: String(name).trim() } : {}),
+      ...(category !== undefined ? { category } : {}),
+      ...(subject !== undefined ? { subject } : {}),
+      ...(bodyHtml !== undefined ? { bodyHtml } : {}),
+      ...(placeholders !== undefined ? { placeholders } : {}),
+      ...(isShared !== undefined ? { isShared } : {}),
+    });
+
+    return res.json({ success: true, template });
+  })
+);
+
+router.delete(
+  "/templates/:id",
+
+  handle(async (req, res) => {
+
+    const template = await EmailTemplate.findOne({
+      where: {
+        id: req.params.id,
+        ...(req.companyId ? { companyId: req.companyId } : {}),
+        [Op.or]: [{ isShared: true }, { ownerId: req.user.id }],
+      },
+    });
+
+    if (!template) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Template not found" });
+    }
+
+    await template.destroy();
+
+    await logEvent({
+      companyId: req.companyId,
+      userId: req.user.id,
+      action: "email_template_deleted",
+      resourceId: req.params.id,
+      changes: {},
+    });
+
+    return res.json({ success: true, message: "Template deleted." });
+  })
+);
+
+// ============================================================
+// HISTORY — combined sent + received log, newest first
+// ============================================================
+// A single chronological view across the two folders users actually think
+// of as "email history" (what came in, what went out). Each row carries a
+// `direction` field ("received" | "sent") derived from `folder` so the UI
+// can badge/color them without guessing from other fields.
+
+router.get(
+  "/history",
+
+  handle(async (req, res) => {
+    const {
+      page,
+      limit,
+      offset,
+    } = parsePagination(req.query);
+
+    const where = {
+      folder: ["inbox", "sent"],
+
+      ...(req.companyId
+        ? { companyId: req.companyId }
+        : {}),
+    };
+
+    const {
+      rows,
+      count: total,
+    } = await Email.findAndCountAll({
+      where,
+
+      include: [accountInclude(req)],
+
+      order: [["createdAt", "DESC"]],
+
+      limit,
+      offset,
+      distinct: true,
+    });
+
+    const emails = rows.map((email) => {
+      const plain =
+        typeof email.toJSON === "function"
+          ? email.toJSON()
+          : email;
+
+      return {
+        ...plain,
+        direction:
+          plain.folder === "sent" ? "sent" : "received",
+      };
+    });
+
+    const totalPages =
+      total === 0 ? 0 : Math.ceil(total / limit);
+
+    return res.json({
+      success: true,
+
+      emails,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    });
+  })
 );
 
 // ============================================================

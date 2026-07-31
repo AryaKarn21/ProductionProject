@@ -11,6 +11,8 @@ import {
   Trash2,
   BarChart3,
   Settings,
+  History,
+  LayoutTemplate,
 } from "lucide-react";
 
 const menuItems = [
@@ -55,6 +57,16 @@ const menuItems = [
     title: "Trash",
     icon: Trash2,
     path: "/email/trash",
+  },
+  {
+    title: "History",
+    icon: History,
+    path: "/email/history",
+  },
+  {
+    title: "Templates",
+    icon: LayoutTemplate,
+    path: "/email/templates",
   },
 ];
 

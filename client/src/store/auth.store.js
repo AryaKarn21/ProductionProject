@@ -107,7 +107,37 @@ export const useAuthStore = create(
         }))
       },
 
-      setActiveCompany: (companyId) => set({ activeCompany: companyId }),
+      // Was a plain `set({ activeCompany: companyId })` — it changed
+      // which company's data API calls fetched (via the X-Company-ID
+      // header in api/axios.js), but never re-fetched *permissions* for
+      // that company. A user can hold a different role per company
+      // (server: middleware/tenant.js applyCompanyRole), so switching
+      // from a company where you're a Manager to one where you're a
+      // plain Employee left the frontend still showing Manager-level UI
+      // (e.g. leave approve/reject buttons) until the next full login.
+      //
+      // The company id is set first, synchronously, so the very next API
+      // call already carries the right header — then GET /auth/me is
+      // re-fetched (now company-aware server-side too, see
+      // server/routes/auth.routes.js buildAuthPayload) and its fresh
+      // permissions are applied via refreshSession().
+      setActiveCompany: async (companyId) => {
+        set({ activeCompany: companyId })
+        try {
+          // Dynamic import: api/axios.js imports this store (for the
+          // request interceptor), so a static top-level import here would
+          // be a circular dependency. Deferring the import until this
+          // function actually runs breaks the cycle.
+          const { authAPI } = await import('@/api/auth.api')
+          const { data } = await authAPI.getProfile()
+          get().refreshSession({ user: data.user, companies: data.companies })
+        } catch {
+          // If this fails, the company id itself has already switched —
+          // worst case the UI shows stale permissions until the next
+          // natural refreshSession() (app focus, next mount), not a
+          // broken switch. Never let a refresh hiccup block navigation.
+        }
+      },
 
       logout: () =>
         set({

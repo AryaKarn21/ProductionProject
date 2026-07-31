@@ -20,6 +20,8 @@ import { groupAPI } from '@/api/group.api'
 import { formatCurrency } from '@/lib/utils'
 import GroupKpiCard from './components/GroupKpiCard'
 import GroupEmptyState from './components/GroupEmptyState'
+import ProfitLossCell from './components/ProfitLossCell'
+import LeadsStageCell from './components/LeadsStageCell'
 
 /*
 |--------------------------------------------------------------------------
@@ -40,12 +42,24 @@ const PERIODS = [
   { value: 90, label: '90 days' },
 ]
 
+// Reporting periods for the Profit / Loss column — calendar-aligned, since
+// "how did this month go" is the question a P&L filter answers, unlike the
+// rolling N-day windows the rest of the dashboard uses.
+const PNL_PERIODS = [
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+  { value: 'quarter', label: 'This Quarter' },
+  { value: 'year', label: 'This Year' },
+]
+
 export default function GroupOverview() {
   const [days, setDays] = useState(30)
+  const [pnlPeriod, setPnlPeriod] = useState('month')
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['group-overview', days],
-    queryFn: () => groupAPI.getOverview({ days }).then((r) => r.data),
+    queryKey: ['group-overview', days, pnlPeriod],
+    queryFn: () => groupAPI.getOverview({ days, pnlPeriod }).then((r) => r.data),
   })
 
   if (isLoading) {
@@ -147,6 +161,21 @@ export default function GroupOverview() {
               icon={TrendingUp}
               tone="good"
             />
+            <GroupKpiCard
+              label="Net profit/loss"
+              value={
+                totals.netProfitLoss > 0
+                  ? `+ ${formatCurrency(totals.netProfitLoss, currency)}`
+                  : totals.netProfitLoss < 0
+                    ? `- ${formatCurrency(Math.abs(totals.netProfitLoss), currency)}`
+                    : formatCurrency(0, currency)
+              }
+              sub={`revenue - expenses, ${PNL_PERIODS.find((p) => p.value === pnlPeriod)?.label.toLowerCase()}`}
+              icon={Wallet}
+              tone={
+                totals.netProfitLoss > 0 ? 'good' : totals.netProfitLoss < 0 ? 'danger' : 'default'
+              }
+            />
 
             <GroupKpiCard
               label="Expenses awaiting approval"
@@ -217,19 +246,35 @@ export default function GroupOverview() {
 
           {/* Per-company breakdown */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border-b border-slate-800">
               <div>
                 <h2 className="text-sm font-bold text-white">Company breakdown</h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Where each child company stands. Click a row for its full activity.
                 </p>
               </div>
-              <Link
-                to="/group/activity"
-                className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1"
-              >
-                Activity feed <ArrowUpRight size={12} />
-              </Link>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-[11px] text-slate-400">
+                  P&amp;L period
+                  <select
+                    value={pnlPeriod}
+                    onChange={(e) => setPnlPeriod(e.target.value)}
+                    className="bg-slate-950/80 border border-slate-800 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {PNL_PERIODS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Link
+                  to="/group/activity"
+                  className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                >
+                  Activity feed <ArrowUpRight size={12} />
+                </Link>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -243,6 +288,7 @@ export default function GroupOverview() {
                     <th className="p-3.5 text-right">Clients</th>
                     <th className="p-3.5 text-right">Pipeline</th>
                     <th className="p-3.5 text-right">Pending expenses</th>
+                    <th className="p-3.5 text-right">Profit / Loss</th>
                     <th className="p-3.5 text-right">Projects</th>
                     <th className="p-3.5 text-right">Open tickets</th>
                     <th className="p-3.5 text-right">Attendance</th>
@@ -252,7 +298,7 @@ export default function GroupOverview() {
                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
                   {children.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="text-center py-10 text-slate-500">
+                      <td colSpan={12} className="text-center py-10 text-slate-500">
                         No child companies to report on.
                       </td>
                     </tr>
@@ -275,11 +321,12 @@ export default function GroupOverview() {
                         </td>
                         <td className="p-3.5 text-right tabular-nums">{row.employees}</td>
                         <td className="p-3.5 text-right tabular-nums">{row.users}</td>
-                        <td className="p-3.5 text-right tabular-nums">
-                          {row.leads}
-                          {row.newLeads > 0 && (
-                            <span className="text-emerald-400 ml-1">+{row.newLeads}</span>
-                          )}
+                        <td className="p-3.5 text-right">
+                          <LeadsStageCell
+                            leadsByStage={row.leadsByStage}
+                            total={row.leads}
+                            newInPeriod={row.newLeads}
+                          />
                         </td>
                         <td className="p-3.5 text-right tabular-nums">{row.clients}</td>
                         <td className="p-3.5 text-right tabular-nums">
@@ -291,6 +338,9 @@ export default function GroupOverview() {
                           }`}
                         >
                           {formatCurrency(row.expensePending, currency)}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <ProfitLossCell pnl={row.pnl} currency={currency} />
                         </td>
                         <td className="p-3.5 text-right tabular-nums">
                           {row.projectsActive}

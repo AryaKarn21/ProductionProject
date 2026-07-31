@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 
+import emailAPI from "@/api/email.api";
+
 import {
   ArrowLeft,
   Mail,
@@ -280,6 +282,25 @@ export default function EmployeeDetail() {
     enabled: activeTab === "performance",
   });
   const reviews = performanceData?.reviews || performanceData || [];
+
+  const { data: employeeEmailsData, isLoading: emailsLoading, isError: emailsError } = useQuery({
+    queryKey: ["employee-emails", id, employee?.email],
+    queryFn: () =>
+      emailAPI.getRelatedEmails({
+        relatedType: "employee",
+        relatedId: id,
+        email: employee?.email || undefined,
+        limit: 25,
+      }),
+    enabled: activeTab === "email" && Boolean(employee),
+  });
+
+  const employeeEmails = (() => {
+    const response = employeeEmailsData?.data ?? employeeEmailsData;
+    if (Array.isArray(response?.emails)) return response.emails;
+    if (Array.isArray(response)) return response;
+    return [];
+  })();
 
   const createReviewMutation = useMutation({
     mutationFn: (data) => performanceAPI.create({ ...data, employeeId: id, reviewerEmployeeId: id }),
@@ -560,6 +581,7 @@ export default function EmployeeDetail() {
     { key: "salary", label: "Salary" },
     { key: "background", label: "Background" },
     { key: "documents", label: "Documents" },
+    { key: "email", label: "Email", count: employeeEmails.length || undefined },
     { key: "reports", label: "Daily Reports", count: dailyReports?.reports?.length },
     { key: "performance", label: "Performance", count: stats?.performance?.totalReviews ?? 0 },
     { key: "assets", label: "Assets", count: assignedAssets?.length ?? undefined },
@@ -654,7 +676,7 @@ export default function EmployeeDetail() {
                           ? `${employee.firstName} ${employee.lastName || ""}`.trim()
                           : "your profile"
                         }`
-                      )}`
+                      )}&relatedType=employee&relatedId=${encodeURIComponent(employee.id)}`
                     )
                   }
                   className="btn btn-secondary flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1044,6 +1066,107 @@ export default function EmployeeDetail() {
                         </table>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* ================= EMAIL ================= */}
+                {activeTab === "email" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
+                        Emails sent to or received from {employee.email || "this employee"}.
+                      </p>
+
+                      <button
+                        type="button"
+                        disabled={!employee.email}
+                        onClick={() =>
+                          navigate(
+                            `/email/compose?to=${encodeURIComponent(
+                              employee.email
+                            )}&subject=${encodeURIComponent(
+                              `Regarding ${employee.firstName
+                                ? `${employee.firstName} ${employee.lastName || ""}`.trim()
+                                : "your profile"
+                              }`
+                            )}&relatedType=employee&relatedId=${encodeURIComponent(employee.id)}`
+                          )
+                        }
+                        className="btn btn-secondary btn-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Mail size={14} /> Compose
+                      </button>
+                    </div>
+
+                    {emailsLoading ? (
+                      <div className="space-y-2">
+                        {Array.from({ length: 3 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="h-16 animate-pulse rounded-lg"
+                            style={{ background: "var(--bg-secondary, rgba(148,163,184,0.08))" }}
+                          />
+                        ))}
+                      </div>
+                    ) : emailsError ? (
+                      <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
+                        Unable to load email history.
+                      </div>
+                    ) : employeeEmails.length ? (
+                      <div className="divide-y" style={{ borderColor: "var(--border-color, rgba(148,163,184,0.15))" }}>
+                        {employeeEmails.map((mail) => (
+                          <div
+                            key={mail.id}
+                            className="flex items-start justify-between gap-4 py-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                  style={{
+                                    background:
+                                      mail.direction === "sent"
+                                        ? "rgba(59,130,246,0.12)"
+                                        : "rgba(34,197,94,0.12)",
+                                    color:
+                                      mail.direction === "sent" ? "#3b82f6" : "#22c55e",
+                                  }}
+                                >
+                                  {mail.direction === "sent" ? "Sent" : "Received"}
+                                </span>
+
+                                <p
+                                  className="truncate text-[13px] font-medium"
+                                  style={{ color: "var(--text-primary)" }}
+                                >
+                                  {mail.subject || "(No subject)"}
+                                </p>
+                              </div>
+
+                              <p
+                                className="mt-1 truncate text-[12px]"
+                                style={{ color: "var(--text-muted)" }}
+                              >
+                                {mail.snippet ||
+                                  mail.bodyText ||
+                                  "No preview available."}
+                              </p>
+                            </div>
+
+                            <span
+                              className="shrink-0 whitespace-nowrap text-[11px]"
+                              style={{ color: "var(--text-muted)" }}
+                            >
+                              {mail.createdAt ? formatDate(mail.createdAt) : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
+                        No emails yet with this employee.
+                      </div>
+                    )}
                   </div>
                 )}
 

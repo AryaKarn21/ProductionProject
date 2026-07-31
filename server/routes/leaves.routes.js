@@ -14,7 +14,23 @@ router.get("/", protect, async (req, res, next) => {
     const where = {};
     if (company) where.companyId = company;
     if (status) where.status = status;
-    if (employeeId) where.employeeId = employeeId;
+
+    // Employees can only see their own leave records.
+    // HR / Admin / Super Admin can filter by any employeeId or see all.
+    if (req.user.role === "employee") {
+      const ownEmployee = await Employee.findOne({
+        where: { userId: req.user.id, companyId: company },
+        attributes: ["id"],
+      });
+      if (!ownEmployee) {
+        // No employee record linked to this account yet — return empty
+        return res.json({ leaves: [], total: 0 });
+      }
+      where.employeeId = ownEmployee.id;
+    } else {
+      if (employeeId) where.employeeId = employeeId;
+    }
+
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const { rows: leaves, count: total } = await Leave.findAndCountAll({
       where,
@@ -102,12 +118,26 @@ router.post("/types", protect, async (req, res, next) => {
 
 router.post("/", protect, async (req, res, next) => {
   try {
-    const employee = await Employee.findByPk(req.body.employeeId);
+    let employee;
 
-    if (!employee) {
-      return res.status(404).json({
-        message: "Employee not found",
+    if (req.user.role === "employee") {
+      // SECURITY: Never trust the employeeId from the request body for
+      // employees. Always derive the employee record from the authenticated
+      // user's own account so they cannot submit on behalf of someone else.
+      employee = await Employee.findOne({
+        where: { userId: req.user.id, companyId: getCompany(req) },
       });
+      if (!employee) {
+        return res.status(403).json({
+          message: "No employee record is linked to your account. Please contact HR.",
+        });
+      }
+    } else {
+      // HR / Admin / Super Admin: trust the supplied employeeId
+      employee = await Employee.findByPk(req.body.employeeId);
+      if (!employee) {
+        return res.status(404).json({ message: "Employee not found" });
+      }
     }
 
     const start = new Date(req.body.startDate);
@@ -117,6 +147,7 @@ router.post("/", protect, async (req, res, next) => {
 
     const leave = await Leave.create({
       ...req.body,
+      employeeId: employee.id,   // always the server-resolved id
       days,
       companyId: getCompany(req),
     });
@@ -158,9 +189,21 @@ router.patch("/:id", protect, async (req, res, next) => {
       },
     });
     if (!leave) {
-      return res.status(404).json({
-        message: "Leave request not found",
+      return res.status(404).json({ message: "Leave request not found" });
+    }
+
+    // Employees can only edit their own leave records.
+    if (req.user.role === "employee") {
+      const ownEmployee = await Employee.findOne({
+        where: { userId: req.user.id, companyId: getCompany(req) },
+        attributes: ["id"],
       });
+      if (!ownEmployee || String(leave.employeeId) !== String(ownEmployee.id)) {
+        return res.status(403).json({ message: "You can only edit your own leave requests." });
+      }
+      // Employees cannot change the employeeId or status themselves
+      delete req.body.employeeId;
+      delete req.body.status;
     }
 
     // Optional: don't allow editing approved leave

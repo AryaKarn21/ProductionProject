@@ -20,6 +20,7 @@ import {
   PayrollRun,
   Vendor,
   Email,
+  LedgerEntry,
 } from '../models/index.js'
 import { authorizePermission } from '../middleware/auth.js'
 import { resolveGroupScope, narrowScope } from '../middleware/groupScope.js'
@@ -134,7 +135,76 @@ const sumByCompany = async (Model, field, companyIds, extraWhere = {}) => {
   }
 }
 
+/**
+ * COUNT(*) grouped by company AND a second field, e.g. Lead.stage.
+ * Returns { [companyId]: { [fieldValue]: count } } so the client can show
+ * a stage-by-stage breakdown instead of one opaque total.
+ */
+const countByCompanyAndField = async (Model, field, companyIds, extraWhere = {}) => {
+  try {
+    const rows = await Model.findAll({
+      where: { companyId: { [Op.in]: companyIds }, ...extraWhere },
+      attributes: ['companyId', field, [fn('COUNT', col('id')), 'count']],
+      group: ['companyId', field],
+      raw: true,
+    })
+    return rows.reduce((acc, row) => {
+      const companyId = String(row.companyId)
+      const fieldValue = row[field] || 'Unknown'
+      acc[companyId] = acc[companyId] || {}
+      acc[companyId][fieldValue] = Number(row.count) || 0
+      return acc
+    }, {})
+  } catch (err) {
+    console.error(`group field-breakdown failed for ${Model?.name}.${field}:`, err.message)
+    return {}
+  }
+}
+
 const sumAll = (map) => Object.values(map).reduce((a, b) => a + b, 0)
+
+/*
+|--------------------------------------------------------------------------
+| P&L reporting period
+|--------------------------------------------------------------------------
+| Independent of the `days` window used by the KPI cards above — the P&L
+| column has its own filter (Today / This Week / This Month / This
+| Quarter / This Year), matching how the rest of the app's finance
+| screens let a user pick a calendar-aligned period rather than a
+| rolling N-day window.
+*/
+const PNL_PERIODS = new Set(['today', 'week', 'month', 'quarter', 'year'])
+
+const getPnlPeriodRange = (period) => {
+  const now = new Date()
+  let start
+
+  switch (period) {
+    case 'today':
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      break
+    case 'week': {
+      // Monday-start week.
+      const day = now.getDay()
+      const diffToMonday = now.getDate() - day + (day === 0 ? -6 : 1)
+      start = new Date(now.getFullYear(), now.getMonth(), diffToMonday)
+      break
+    }
+    case 'quarter': {
+      const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
+      start = new Date(now.getFullYear(), quarterStartMonth, 1)
+      break
+    }
+    case 'year':
+      start = new Date(now.getFullYear(), 0, 1)
+      break
+    case 'month':
+    default:
+      start = new Date(now.getFullYear(), now.getMonth(), 1)
+  }
+
+  return { start, end: now }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -192,11 +262,13 @@ router.get('/overview', async (req, res, next) => {
           'purchaseOrdersPending', 'purchaseOrdersTotal', 'changes',
           'users', 'clients', 'vendors', 'attendancePresent',
           'attendanceMarked', 'payrollNet', 'emailsInPeriod',
+          'totalRevenue', 'totalExpenses', 'netProfitLoss',
         ].map((k) => [k, 0])
       )
 
       return res.json({
         periodDays: 30,
+        pnlPeriod: PNL_PERIODS.has(req.query.pnlPeriod) ? req.query.pnlPeriod : 'month',
         root: companyLabel(req, req.groupRootId),
         isEmpty: true,
         totals: zeroed,
@@ -208,6 +280,10 @@ router.get('/overview', async (req, res, next) => {
     // and the "activity this period" counts are measured over.
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365)
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    // The P&L column has its own, separate period filter.
+    const pnlPeriod = PNL_PERIODS.has(req.query.pnlPeriod) ? req.query.pnlPeriod : 'month'
+    const pnlRange = getPnlPeriodRange(pnlPeriod)
 
     const [
       leads,
@@ -234,6 +310,11 @@ router.get('/overview', async (req, res, next) => {
       attendanceMarked,
       payrollNet,
       emailsInPeriod,
+      pnlRevenue,
+      pnlExpenses,
+      hasLedgerHistory,
+      hasExpenseHistory,
+      leadsByStage,
     ] = await Promise.all([
       countByCompany(Lead, ids),
       countByCompany(Opportunity, ids, {
@@ -280,6 +361,27 @@ router.get('/overview', async (req, res, next) => {
         status: { [Op.in]: ['approved', 'paid'] },
       }),
       countByCompany(Email, ids, { createdAt: { [Op.gte]: since } }),
+      // P&L — Revenue = posted ledger income (paid invoices / completed
+      // sales), never pipeline, which is only potential future revenue.
+      sumByCompany(LedgerEntry, 'credit', ids, {
+        type: 'credit',
+        date: { [Op.gte]: pnlRange.start, [Op.lte]: pnlRange.end },
+      }),
+      // Expenses = approved company expenses only; pending/rejected ones
+      // aren't real outflows yet.
+      sumByCompany(Expense, 'amount', ids, {
+        status: 'approved',
+        date: { [Op.gte]: pnlRange.start, [Op.lte]: pnlRange.end },
+      }),
+      // All-time existence checks (ignoring the period filter), so a
+      // company with no accounting history at all shows "—" rather than
+      // a misleading NPR 0 break-even for the period.
+      countByCompany(LedgerEntry, ids, { type: 'credit' }),
+      countByCompany(Expense, ids, { status: 'approved' }),
+      // Lead pipeline stage breakdown (New / Contacted / Qualified / ...),
+      // so the Leads column can show what's actually happening instead of
+      // one opaque total plus a "+N new" that reads like a stage count.
+      countByCompanyAndField(Lead, 'stage', ids),
     ])
 
     // Per-company rows, so the parent can see which child is which.
@@ -288,6 +390,10 @@ router.get('/overview', async (req, res, next) => {
       isRoot: id === req.groupRootId,
       leads: leads[id] || 0,
       newLeads: newLeadsInPeriod[id] || 0,
+      // { New: 2, Contacted: 1, Qualified: 4, ... } — only stages with at
+      // least one lead are present, so the client doesn't have to filter
+      // zeroes.
+      leadsByStage: leadsByStage[id] || {},
       openOpportunities: openOpportunities[id] || 0,
       pipelineValue: pipelineValue[id] || 0,
       wonValue: wonValue[id] || 0,
@@ -313,10 +419,22 @@ router.get('/overview', async (req, res, next) => {
         : null,
       payrollNet: payrollNet[id] || 0,
       emailsInPeriod: emailsInPeriod[id] || 0,
+      // Profit & Loss for the selected reporting period. `available` is
+      // false only when the company has never posted a single ledger
+      // credit or approved expense — i.e. no accounting data exists to
+      // report on — so the client can show "—" instead of a misleading
+      // NPR 0.
+      pnl: {
+        available: Boolean(hasLedgerHistory[id] || hasExpenseHistory[id]),
+        totalRevenue: pnlRevenue[id] || 0,
+        totalExpenses: pnlExpenses[id] || 0,
+        netProfitLoss: (pnlRevenue[id] || 0) - (pnlExpenses[id] || 0),
+      },
     }))
 
     res.json({
       periodDays: days,
+      pnlPeriod,
       root: companyLabel(req, req.groupRootId),
       isEmpty: req.groupEmpty,
       totals: {
@@ -349,6 +467,9 @@ router.get('/overview', async (req, res, next) => {
           : null,
         payrollNet: sumAll(payrollNet),
         emailsInPeriod: sumAll(emailsInPeriod),
+        totalRevenue: sumAll(pnlRevenue),
+        totalExpenses: sumAll(pnlExpenses),
+        netProfitLoss: sumAll(pnlRevenue) - sumAll(pnlExpenses),
       },
       byCompany,
     })

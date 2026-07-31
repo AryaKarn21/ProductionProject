@@ -128,6 +128,7 @@ export default function Compose() {
       ...INITIAL_FORM,
       to: searchParams.get("to") || "",
       subject: searchParams.get("subject") || "",
+      body: searchParams.get("body") || "",
     }));
 
   const [showCc, setShowCc] =
@@ -368,6 +369,13 @@ export default function Compose() {
         form.subject.trim(),
       bodyText: form.body,
     };
+
+    const relatedType = searchParams.get("relatedType");
+    const relatedId = searchParams.get("relatedId");
+    if (relatedType && relatedId) {
+      payload.relatedType = relatedType;
+      payload.relatedId = relatedId;
+    }
 
     if (cc.length) {
       payload.cc = cc;

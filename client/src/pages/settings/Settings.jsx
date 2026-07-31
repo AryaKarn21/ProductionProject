@@ -269,9 +269,24 @@ function CompanyTab({ canManage = false }) {
   })
 
   const onSubmit = (data) => {
-    // An empty <select> value is "", which the server's uuid rule would
-    // reject. Send null to mean "no parent — this is a top-level company".
     const payload = { ...data, parentId: data.parentId || null }
+
+    // ── Client-side duplicate guard ──────────────────────────────────
+    // Catches the most obvious case before the network round-trip.
+    // The backend enforces the same rule so this is defence-in-depth.
+    const nameNormalised = data.name.trim().toLowerCase()
+    const clash = companies.find((c) => {
+      if (editingCompany && c.id === editingCompany.id) return false // skip self
+      const sameName = c.name.trim().toLowerCase() === nameNormalised
+      const sameParent = (c.parentId || null) === (payload.parentId || null)
+      return sameName && sameParent
+    })
+    if (clash) {
+      toast.error(`"${clash.name}" already exists in this group. Choose a different name.`)
+      return
+    }
+    // ────────────────────────────────────────────────────────────────
+
     if (editingCompany) updateMutation.mutate({ id: editingCompany.id, data: payload })
     else createMutation.mutate(payload)
   }
@@ -399,7 +414,20 @@ function CompanyTab({ canManage = false }) {
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5 text-xs">
               <FormField label="Company Name *">
                 <input
-                  {...register('name', { required: 'Company name is required' })}
+                  {...register('name', {
+                    required: 'Company name is required',
+                    validate: (value) => {
+                      const nameNorm = value.trim().toLowerCase()
+                      const parentId = editingCompany?.parentId || activeCompany || null
+                      const clash = companies.find((c) => {
+                        if (editingCompany && c.id === editingCompany.id) return false
+                        const sameParent = (c.parentId || null) === (parentId || null)
+                        return c.name.trim().toLowerCase() === nameNorm && sameParent
+                      })
+                      if (clash) return `"${clash.name}" already exists in this group`
+                      return true
+                    },
+                  })}
                   className={inputCls}
                   placeholder="e.g. OS Group Pvt Ltd"
                 />
@@ -500,7 +528,8 @@ function CompanyTab({ canManage = false }) {
                 </button>
                 <button
                   type="submit"
-                  className="px-3.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm"
+                  disabled={Object.keys(errors).length > 0 || createMutation.isPending || updateMutation.isPending}
+                  className="px-3.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors shadow-sm"
                 >
                   {editingCompany ? 'Update Profile' : 'Create Company'}
                 </button>

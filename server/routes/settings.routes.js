@@ -334,6 +334,31 @@ router.post(
         }
       }
 
+      // ── Duplicate name guard ─────────────────────────────────────────
+      // Two companies with the same name under the same parent is almost
+      // always a mistake. The check is case-insensitive so "Acme" and
+      // "acme" are treated as the same company.
+      const { Op } = await import('sequelize')
+      const existing = await Company.findOne({
+        where: {
+          name:     { [Op.like]: req.body.name.trim() },
+          parentId: parentId || null,
+        },
+        transaction: t,
+        paranoid: false, // also catch soft-deleted names
+      })
+
+      if (existing) {
+        await t.rollback()
+        const scope = parentId
+          ? `under the same parent company`
+          : `as a top-level company`
+        return res.status(409).json({
+          message: `A company named "${existing.name}" already exists ${scope}. Please use a different name.`,
+        })
+      }
+      // ────────────────────────────────────────────────────────────────
+
       const company = await withoutAutoAudit(() =>
         Company.create(
           { ...pick(req.body, COMPANY_WRITABLE_FIELDS), parentId: parentId || null },
@@ -410,6 +435,27 @@ router.patch(
       }
 
       Object.assign(company, pick(req.body, COMPANY_WRITABLE_FIELDS))
+
+      // ── Duplicate name guard (on rename) ────────────────────────────
+      // Only check when the name is actually being changed.
+      if (req.body.name && req.body.name.trim().toLowerCase() !== before.name.toLowerCase()) {
+        const { Op } = await import('sequelize')
+        const clash = await Company.findOne({
+          where: {
+            name:     { [Op.like]: req.body.name.trim() },
+            parentId: company.parentId || null,
+            id:       { [Op.ne]: company.id },
+          },
+          paranoid: false,
+        })
+        if (clash) {
+          return res.status(409).json({
+            message: `A company named "${clash.name}" already exists in this group. Please choose a different name.`,
+          })
+        }
+      }
+      // ────────────────────────────────────────────────────────────────
+
       await withoutAutoAudit(() => company.save())
       invalidateCompanyTree()
 

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { Plus, Check, X as XIcon, Ban, Calendar, Building2 } from "lucide-react";
+import { Plus, Check, X as XIcon, Ban, Calendar, Building2, UserCheck } from "lucide-react";
 import { leavesAPI } from "@/api/leaves.api";
 import { employeesAPI } from "@/api/employees.api";
 import { useAuthStore } from "@/store/auth.store";
@@ -85,19 +85,34 @@ export default function LeaveRequests() {
     placeholderData: keepPreviousData,
   });
 
-  const { data: empData } = useQuery({
-    queryKey: ["employees-all"],
-    queryFn: () => employeesAPI.getAll({ limit: 200 }).then((r) => r.data),
-  });
-  const employees = empData?.employees || [];
+  // Role check — employee role sees only themselves
+  const isEmployee = user?.role === "employee";
 
   const {
-    register, handleSubmit, reset, watch,
+    register, handleSubmit, reset, watch, setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(leaveSchema),
     defaultValues: { employeeId: "", leaveType: "", startDate: "", endDate: "", reason: "" },
   });
+
+  const { data: empData } = useQuery({
+    queryKey: ["employees-all", isEmployee ? user?.id : "all"],
+    queryFn: () => employeesAPI.getAll({ limit: 200 }).then((r) => r.data),
+  });
+  const employees = empData?.employees || [];
+
+  // For the Employee role: find their own record and auto-select it in the form
+  const ownEmployee = isEmployee
+    ? employees.find((e) => e.userId === user?.id || e.email === user?.email)
+    : null;
+
+  // Auto-select own employee record when modal opens for Employee role
+  useEffect(() => {
+    if (isEmployee && ownEmployee && modalOpen) {
+      setValue("employeeId", String(ownEmployee.id));
+    }
+  }, [isEmployee, ownEmployee, modalOpen, setValue]);
 
   const watchStart = watch("startDate");
   const watchEnd = watch("endDate");
@@ -150,14 +165,17 @@ export default function LeaveRequests() {
     const busy = pendingRowId === row.id;
     return (
       <div className="flex items-center justify-end gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-        <button
-          className="btn btn-sm btn-secondary"
-          onClick={() => navigate(`/hr/leaves/${row.id}/edit`)}
-          disabled={busy}
-        >
-          Edit
-        </button>
-        {row.status === "pending" && (
+        {/* Employees can only edit/cancel their own; HR+ can do everything */}
+        {!isEmployee && (
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={() => navigate(`/hr/leaves/${row.id}/edit`)}
+            disabled={busy}
+          >
+            Edit
+          </button>
+        )}
+        {!isEmployee && row.status === "pending" && (
           <>
             <button
               className="btn btn-sm btn-ghost flex items-center gap-1"
@@ -373,18 +391,38 @@ export default function LeaveRequests() {
             <span>Submitting leave for <strong style={{ color: "var(--text-primary)" }}>{companyName}</strong></span>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Employee *</label>
-            <select className="input" {...register("employeeId")}>
-              <option value="">Select employee</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.firstName} {e.lastName} — {e.department}
-                </option>
-              ))}
-            </select>
-            {errors.employeeId && <p className="text-[11px] text-red-500 mt-1">{errors.employeeId.message}</p>}
-          </div>
+          {/* Employee selector — hidden & locked for the Employee role */}
+          {isEmployee ? (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[12px]"
+              style={{ background: "var(--surface-2)", color: "var(--text-secondary)" }}
+            >
+              <UserCheck size={13} style={{ color: "var(--primary)" }} />
+              <span>
+                Submitting as{" "}
+                <strong style={{ color: "var(--text-primary)" }}>
+                  {ownEmployee
+                    ? `${ownEmployee.firstName} ${ownEmployee.lastName}`
+                    : user?.name || "you"}
+                </strong>
+              </span>
+              {/* Hidden input carries the value for react-hook-form */}
+              <input type="hidden" {...register("employeeId")} />
+            </div>
+          ) : (
+            <div className="form-group">
+              <label className="form-label">Employee *</label>
+              <select className="input" {...register("employeeId")}>
+                <option value="">Select employee</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.firstName} {e.lastName} — {e.department}
+                  </option>
+                ))}
+              </select>
+              {errors.employeeId && <p className="text-[11px] text-red-500 mt-1">{errors.employeeId.message}</p>}
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">Leave Type *</label>
